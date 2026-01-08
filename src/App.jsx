@@ -71,6 +71,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
     targetPriceLow: '',
     targetPriceHigh: '',
     selectedExpiries: [],
+    optimization: '', // 'max_return', 'risk_reward', 'diversified'
   });
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
@@ -121,13 +122,13 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
       const maxRisk = parseFloat(formData.maxRisk) || budget;
       const targetLow = parseFloat(formData.targetPriceLow);
       const targetHigh = parseFloat(formData.targetPriceHigh);
-      const targetPrice = formData.direction === 'bullish' ? targetHigh : targetLow;
+      const optimization = formData.optimization || 'max_return';
       const selectedExpiries = formData.selectedExpiries;
 
-      // Collect all viable options across all selected expiries
+      // Collect all viable options across ALL selected expiries (no limit)
       const allViableOptions = [];
 
-      for (const expiry of selectedExpiries.slice(0, 5)) {
+      for (const expiry of selectedExpiries) {
         const data = await fetchOptionsChain(formData.ticker, expiry);
         const options = formData.direction === 'bullish'
           ? (data.options?.calls || [])
@@ -142,16 +143,17 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
           // Calculate potential profit at target price
           let intrinsicAtTarget;
           if (formData.direction === 'bullish') {
-            if (opt.strike > targetHigh) continue; // Skip OTM calls above target
+            if (opt.strike > targetHigh) continue;
             intrinsicAtTarget = Math.max(0, targetHigh - opt.strike);
           } else {
-            if (opt.strike < targetLow) continue; // Skip OTM puts below target
+            if (opt.strike < targetLow) continue;
             intrinsicAtTarget = Math.max(0, opt.strike - targetLow);
           }
 
           const profitPer100 = (intrinsicAtTarget - premium) * 100;
           const returnPct = (profitPer100 / costPer100) * 100;
           const maxQty = Math.floor(budget / costPer100);
+          const riskRewardRatio = profitPer100 > 0 ? profitPer100 / costPer100 : -1;
 
           if (maxQty >= 1 && returnPct > -50) {
             allViableOptions.push({
@@ -163,196 +165,137 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
               returnPct,
               maxQty,
               strike: opt.strike,
+              riskRewardRatio,
             });
           }
         }
       }
 
-      // Sort by return percentage
-      allViableOptions.sort((a, b) => b.returnPct - a.returnPct);
+      // Generate optimal multi-position portfolio based on optimization preference
+      const generateOptimalPortfolio = (options, budgetLimit, sortBy) => {
+        // Sort options by the chosen metric
+        const sorted = [...options].sort((a, b) => {
+          if (sortBy === 'max_return') return b.returnPct - a.returnPct;
+          if (sortBy === 'risk_reward') return b.riskRewardRatio - a.riskRewardRatio;
+          return 0; // diversified uses different logic
+        });
 
-      // Generate portfolio suggestions
-      const portfolios = [];
+        const positions = [];
+        let remaining = budgetLimit;
 
-      // Strategy 1: Single best option (max contracts)
-      if (allViableOptions.length > 0) {
-        const best = allViableOptions[0];
-        const qty = Math.min(best.maxQty, Math.floor(maxRisk / best.costPer100));
-        if (qty >= 1) {
-          portfolios.push({
-            name: 'Highest Return',
-            description: 'Maximize percentage return with single strike',
-            positions: [{ ...best, qty }],
-            totalCost: qty * best.costPer100,
-            totalProfit: qty * best.profitPer100,
-            totalReturn: best.returnPct,
-          });
-        }
-      }
+        if (sortBy === 'diversified') {
+          // Get unique strikes and expiries, spread budget across them
+          const uniqueStrikes = [...new Set(options.map(o => o.strike))];
+          const uniqueExpiries = [...new Set(options.map(o => o.expiry))];
+          const combinations = [];
 
-      // Strategy 2: Diversified across strikes (split budget)
-      if (allViableOptions.length >= 2) {
-        const diversified = [];
-        let remaining = Math.min(budget, maxRisk);
-        const uniqueStrikes = [...new Set(allViableOptions.map(o => o.strike))].slice(0, 3);
+          // Create strike/expiry combinations
+          for (const strike of uniqueStrikes) {
+            for (const expiry of uniqueExpiries) {
+              const opt = options.find(o => o.strike === strike && o.expiry === expiry);
+              if (opt) combinations.push(opt);
+            }
+          }
 
-        for (const strike of uniqueStrikes) {
-          const opt = allViableOptions.find(o => o.strike === strike);
-          if (opt && remaining >= opt.costPer100) {
-            const qty = Math.min(Math.floor(remaining / opt.costPer100), Math.ceil(budget / (opt.costPer100 * uniqueStrikes.length)));
+          // Spread budget across combinations
+          const perPosition = budgetLimit / Math.min(combinations.length, 8);
+          for (const opt of combinations.slice(0, 10)) {
+            if (remaining < opt.costPer100) continue;
+            const qty = Math.min(Math.floor(perPosition / opt.costPer100), Math.floor(remaining / opt.costPer100));
             if (qty >= 1) {
-              diversified.push({ ...opt, qty });
+              positions.push({ ...opt, qty });
               remaining -= qty * opt.costPer100;
             }
           }
-        }
-
-        if (diversified.length >= 2) {
-          const totalCost = diversified.reduce((sum, p) => sum + p.qty * p.costPer100, 0);
-          const totalProfit = diversified.reduce((sum, p) => sum + p.qty * p.profitPer100, 0);
-          portfolios.push({
-            name: 'Diversified Strikes',
-            description: 'Split across multiple strike prices for balanced risk',
-            positions: diversified,
-            totalCost,
-            totalProfit,
-            totalReturn: (totalProfit / totalCost) * 100,
-          });
-        }
-      }
-
-      // Strategy 3: Conservative (higher probability, lower strike for calls)
-      const conservative = allViableOptions.filter(o =>
-        formData.direction === 'bullish'
-          ? o.strike <= stockPrice * 1.02  // ATM or slightly ITM calls
-          : o.strike >= stockPrice * 0.98  // ATM or slightly ITM puts
-      );
-      if (conservative.length > 0) {
-        const best = conservative.sort((a, b) => b.returnPct - a.returnPct)[0];
-        const qty = Math.min(best.maxQty, Math.floor(maxRisk / best.costPer100));
-        if (qty >= 1) {
-          portfolios.push({
-            name: 'Conservative',
-            description: 'Near-the-money for higher probability of profit',
-            positions: [{ ...best, qty }],
-            totalCost: qty * best.costPer100,
-            totalProfit: qty * best.profitPer100,
-            totalReturn: best.returnPct,
-          });
-        }
-      }
-
-      // Strategy 4: Aggressive (OTM for max leverage)
-      const aggressive = allViableOptions.filter(o =>
-        formData.direction === 'bullish'
-          ? o.strike >= stockPrice * 1.05 && o.returnPct > 50
-          : o.strike <= stockPrice * 0.95 && o.returnPct > 50
-      );
-      if (aggressive.length > 0) {
-        const best = aggressive[0];
-        const qty = Math.min(best.maxQty, Math.floor(maxRisk / best.costPer100));
-        if (qty >= 1) {
-          portfolios.push({
-            name: 'Aggressive',
-            description: 'Out-of-the-money for maximum leverage',
-            positions: [{ ...best, qty }],
-            totalCost: qty * best.costPer100,
-            totalProfit: qty * best.profitPer100,
-            totalReturn: best.returnPct,
-          });
-        }
-      }
-
-      // Strategy 5: Diversified Expiries (split across different expiration dates)
-      const uniqueExpiries = [...new Set(allViableOptions.map(o => o.expiry))];
-      if (uniqueExpiries.length >= 2) {
-        const diversifiedExpiries = [];
-        let remaining = Math.min(budget, maxRisk);
-
-        // Get best option for each expiry date
-        for (const expiry of uniqueExpiries.slice(0, 3)) {
-          const optionsForExpiry = allViableOptions.filter(o => o.expiry === expiry);
-          if (optionsForExpiry.length > 0) {
-            // Pick the best return option for this expiry
-            const best = optionsForExpiry[0];
-            if (remaining >= best.costPer100) {
-              const qty = Math.min(
-                Math.floor(remaining / best.costPer100),
-                Math.ceil(budget / (best.costPer100 * uniqueExpiries.length))
-              );
-              if (qty >= 1) {
-                diversifiedExpiries.push({ ...best, qty });
-                remaining -= qty * best.costPer100;
-              }
+        } else {
+          // Greedy allocation for max_return or risk_reward
+          for (const opt of sorted) {
+            if (remaining < opt.costPer100) continue;
+            // Allocate proportionally - more to better options
+            const allocation = Math.min(remaining, budgetLimit * 0.4);
+            const qty = Math.floor(allocation / opt.costPer100);
+            if (qty >= 1) {
+              positions.push({ ...opt, qty });
+              remaining -= qty * opt.costPer100;
             }
+            if (positions.length >= 8) break; // Reasonable limit per portfolio
           }
         }
 
-        if (diversifiedExpiries.length >= 2) {
-          const totalCost = diversifiedExpiries.reduce((sum, p) => sum + p.qty * p.costPer100, 0);
-          const totalProfit = diversifiedExpiries.reduce((sum, p) => sum + p.qty * p.profitPer100, 0);
+        if (positions.length === 0) return null;
+
+        const totalCost = positions.reduce((sum, p) => sum + p.qty * p.costPer100, 0);
+        const totalProfit = positions.reduce((sum, p) => sum + p.qty * p.profitPer100, 0);
+
+        return {
+          positions,
+          totalCost,
+          totalProfit,
+          totalReturn: (totalProfit / totalCost) * 100,
+        };
+      };
+
+      const portfolios = [];
+
+      // Generate primary recommended portfolio based on user's optimization preference
+      const primaryPortfolio = generateOptimalPortfolio(allViableOptions, Math.min(budget, maxRisk), optimization);
+      if (primaryPortfolio) {
+        const optimizationNames = {
+          max_return: { name: 'Maximum Return', desc: 'Optimized for highest potential ROI at your target price' },
+          risk_reward: { name: 'Best Risk/Reward', desc: 'Balanced allocation prioritizing favorable risk/reward ratios' },
+          diversified: { name: 'Diversified', desc: 'Spread across multiple strikes and expiries to reduce risk' },
+        };
+        portfolios.push({
+          ...primaryPortfolio,
+          name: `Recommended: ${optimizationNames[optimization].name}`,
+          description: optimizationNames[optimization].desc,
+          isRecommended: true,
+        });
+      }
+
+      // Generate alternative portfolios with different strategies
+      const alternatives = ['max_return', 'risk_reward', 'diversified'].filter(o => o !== optimization);
+      for (const alt of alternatives) {
+        const altPortfolio = generateOptimalPortfolio(allViableOptions, Math.min(budget, maxRisk), alt);
+        if (altPortfolio && altPortfolio.positions.length > 0) {
+          const altNames = {
+            max_return: { name: 'High Return Focus', desc: 'Alternative focused on maximum percentage gains' },
+            risk_reward: { name: 'Balanced Approach', desc: 'Alternative with better risk/reward balance' },
+            diversified: { name: 'Spread Strategy', desc: 'Alternative spreading risk across positions' },
+          };
           portfolios.push({
-            name: 'Diversified Expiries',
-            description: 'Split across multiple expiration dates to manage time risk',
-            positions: diversifiedExpiries,
-            totalCost,
-            totalProfit,
-            totalReturn: (totalProfit / totalCost) * 100,
+            ...altPortfolio,
+            name: altNames[alt].name,
+            description: altNames[alt].desc,
           });
         }
       }
 
-      // Strategy 6: Calendar Ladder (mix of near and far expiries with varying strikes)
-      if (uniqueExpiries.length >= 2 && allViableOptions.length >= 3) {
-        const calendarLadder = [];
-        let remaining = Math.min(budget, maxRisk);
-
-        // Near-term aggressive (higher strike, sooner expiry)
-        const nearExpiry = uniqueExpiries[0];
-        const farExpiry = uniqueExpiries[uniqueExpiries.length - 1];
-
-        const nearOptions = allViableOptions.filter(o => o.expiry === nearExpiry && o.returnPct > 30);
-        const farOptions = allViableOptions.filter(o => o.expiry === farExpiry);
-
-        if (nearOptions.length > 0 && farOptions.length > 0) {
-          // Allocate 40% to near-term, 60% to far-term
-          const nearBudget = remaining * 0.4;
-          const farBudget = remaining * 0.6;
-
-          const nearBest = nearOptions[0];
-          const farBest = farOptions.find(o => o.strike <= stockPrice * 1.02) || farOptions[0];
-
-          const nearQty = Math.floor(nearBudget / nearBest.costPer100);
-          const farQty = Math.floor(farBudget / farBest.costPer100);
-
-          if (nearQty >= 1 && farQty >= 1) {
-            calendarLadder.push({ ...nearBest, qty: nearQty });
-            calendarLadder.push({ ...farBest, qty: farQty });
-
-            const totalCost = calendarLadder.reduce((sum, p) => sum + p.qty * p.costPer100, 0);
-            const totalProfit = calendarLadder.reduce((sum, p) => sum + p.qty * p.profitPer100, 0);
-
-            portfolios.push({
-              name: 'Calendar Ladder',
-              description: 'Near-term aggressive + far-term conservative for time diversification',
-              positions: calendarLadder,
-              totalCost,
-              totalProfit,
-              totalReturn: (totalProfit / totalCost) * 100,
-            });
-          }
+      // Add a single-position "simple" option for comparison
+      if (allViableOptions.length > 0) {
+        const best = allViableOptions.sort((a, b) => b.returnPct - a.returnPct)[0];
+        const qty = Math.min(best.maxQty, Math.floor(maxRisk / best.costPer100));
+        if (qty >= 1) {
+          portfolios.push({
+            name: 'Simple (Single Position)',
+            description: `All-in on the highest return option: $${best.strike} strike`,
+            positions: [{ ...best, qty }],
+            totalCost: qty * best.costPer100,
+            totalProfit: qty * best.profitPer100,
+            totalReturn: best.returnPct,
+          });
         }
       }
 
-      // Remove duplicates and sort by total return
-      const uniquePortfolios = portfolios.filter((p, i, arr) =>
-        arr.findIndex(x => JSON.stringify(x.positions.map(pos => `${pos.strike}-${pos.qty}`)) ===
-                         JSON.stringify(p.positions.map(pos => `${pos.strike}-${pos.qty}`))) === i
-      );
-      uniquePortfolios.sort((a, b) => b.totalReturn - a.totalReturn);
+      // Sort by recommended first, then by return
+      portfolios.sort((a, b) => {
+        if (a.isRecommended) return -1;
+        if (b.isRecommended) return 1;
+        return b.totalReturn - a.totalReturn;
+      });
 
-      setSuggestions(uniquePortfolios);
-      setStep(6);
+      setSuggestions(portfolios);
+      setStep(7);
     } catch (error) {
       console.error('Error:', error);
     } finally {
@@ -402,6 +345,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
       targetPriceLow: '',
       targetPriceHigh: '',
       selectedExpiries: [],
+      optimization: '',
     });
   };
 
@@ -587,11 +531,11 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
             <div className="flex gap-2">
               <button onClick={() => setStep(4)} className="px-4 py-2 text-neutral-400">Back</button>
               <button
-                onClick={generateSuggestions}
+                onClick={() => setStep(6)}
                 disabled={!formData.maxRisk}
                 className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white"
               >
-                Find Options
+                Next
               </button>
             </div>
           </>
@@ -600,18 +544,59 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
       case 6:
         return (
           <>
+            <p className="text-neutral-400 mb-4">What's your priority for this trade?</p>
+            <div className="space-y-2 mb-4">
+              {[
+                { value: 'max_return', label: 'Maximum Return', desc: 'Focus on highest potential % gain at your target price' },
+                { value: 'risk_reward', label: 'Best Risk/Reward', desc: 'Balance between potential gains and risk of loss' },
+                { value: 'diversified', label: 'Diversified', desc: 'Spread across multiple strikes/expiries to reduce risk' },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => { handleInputChange('optimization', opt.value); }}
+                  className={`w-full p-4 rounded-lg border text-left transition-all ${
+                    formData.optimization === opt.value
+                      ? 'border-blue-500 bg-blue-500/20'
+                      : 'border-neutral-700 hover:border-neutral-600'
+                  }`}
+                >
+                  <div className="font-medium text-white">{opt.label}</div>
+                  <div className="text-xs text-neutral-400">{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-neutral-500 mb-4">
+              Based on your {formData.direction} outlook and ${formData.budget} budget, we'll find the optimal portfolio.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setStep(5)} className="px-4 py-2 text-neutral-400">Back</button>
+              <button
+                onClick={generateSuggestions}
+                disabled={!formData.optimization}
+                className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white"
+              >
+                Find Portfolios
+              </button>
+            </div>
+          </>
+        );
+
+      case 7:
+        return (
+          <>
             {suggestions.length > 0 ? (
               <>
                 <p className="text-neutral-400 mb-4">Portfolio strategies for your ${formData.budget} budget:</p>
                 <div className="space-y-4">
                   {suggestions.map((portfolio, idx) => (
-                    <div key={idx} className="bg-black/70 rounded-lg p-4 border border-neutral-800">
+                    <div key={idx} className={`bg-black/70 rounded-lg p-4 border ${portfolio.isRecommended ? 'border-green-500/50 ring-1 ring-green-500/30' : 'border-neutral-800'}`}>
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <span className="font-semibold text-white">{portfolio.name}</span>
-                          <p className="text-xs text-neutral-500">{portfolio.description}</p>
+                          {portfolio.isRecommended && <span className="ml-2 text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded">Best Match</span>}
+                          <p className="text-xs text-neutral-500 mt-1">{portfolio.description}</p>
                         </div>
-                        <span className={`font-bold ${portfolio.totalReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        <span className={`font-bold text-lg ${portfolio.totalReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                           {portfolio.totalReturn >= 0 ? '+' : ''}{portfolio.totalReturn.toFixed(0)}%
                         </span>
                       </div>
@@ -655,18 +640,13 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
                         </div>
                       </div>
 
-                      {/* Action buttons */}
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {portfolio.positions.map((pos, posIdx) => (
-                          <button
-                            key={posIdx}
-                            onClick={() => selectSuggestion(portfolio, posIdx)}
-                            className="flex-1 min-w-[80px] py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs"
-                          >
-                            ${pos.strike} ({unixToDate(pos.expiry).slice(5)})
-                          </button>
-                        ))}
-                      </div>
+                      {/* Single Load Portfolio Button */}
+                      <button
+                        onClick={() => selectSuggestion(portfolio)}
+                        className="w-full mt-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium"
+                      >
+                        Load Portfolio ({portfolio.positions.length} position{portfolio.positions.length > 1 ? 's' : ''})
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -1096,12 +1076,62 @@ function GreeksDashboard({ greeks }) {
 }
 
 // Payoff Chart Component
-function PayoffChart({ data, breakEven, optionType }) {
+function PayoffChart({ data, breakEven, optionType, portfolio, stockPrice }) {
+  const hasPortfolio = portfolio && portfolio.length > 1;
+
+  // Generate combined portfolio P&L data
+  const generatePortfolioData = () => {
+    if (!hasPortfolio || !stockPrice) return null;
+
+    const priceRange = 0.3;
+    const minPrice = Math.max(0, stockPrice * (1 - priceRange));
+    const maxPrice = stockPrice * (1 + priceRange);
+    const step = (maxPrice - minPrice) / 50;
+
+    const chartData = [];
+    for (let price = minPrice; price <= maxPrice; price += step) {
+      let totalPnL = 0;
+      for (const pos of portfolio) {
+        const qty = pos.qty || 1;
+        const premium = pos.premium;
+        const strike = pos.strikePrice;
+        const type = pos.optionType;
+
+        let intrinsic;
+        if (type === 'call') {
+          intrinsic = Math.max(0, price - strike);
+        } else {
+          intrinsic = Math.max(0, strike - price);
+        }
+        totalPnL += (intrinsic - premium) * 100 * qty;
+      }
+      chartData.push({
+        stockPrice: parseFloat(price.toFixed(2)),
+        pnl: parseFloat(totalPnL.toFixed(2)),
+      });
+    }
+    return chartData;
+  };
+
+  const chartData = hasPortfolio ? generatePortfolioData() : data;
+  const totalCost = hasPortfolio
+    ? portfolio.reduce((sum, p) => sum + (p.costPer100 || p.premium * 100) * (p.qty || 1), 0)
+    : null;
+
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
-      <h2 className="text-xl font-semibold mb-4 text-white">P&L at Expiration</h2>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-semibold text-white">
+          {hasPortfolio ? 'Combined Portfolio P&L at Expiration' : 'P&L at Expiration'}
+        </h2>
+        {hasPortfolio && (
+          <span className="text-sm text-neutral-400">
+            {portfolio.length} positions | Total cost: ${totalCost?.toFixed(0)}
+          </span>
+        )}
+      </div>
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+        <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
           <XAxis
             dataKey="stockPrice"
@@ -1119,11 +1149,11 @@ function PayoffChart({ data, breakEven, optionType }) {
               borderRadius: '8px',
             }}
             labelStyle={{ color: '#9CA3AF' }}
-            formatter={(value) => [`$${value.toFixed(2)}`, 'P&L']}
+            formatter={(value) => [`$${value.toFixed(2)}`, hasPortfolio ? 'Portfolio P&L' : 'P&L']}
             labelFormatter={(label) => `Stock: $${label}`}
           />
           <ReferenceLine y={0} stroke="#6B7280" strokeDasharray="5 5" />
-          {breakEven > 0 && (
+          {!hasPortfolio && breakEven > 0 && (
             <ReferenceLine
               x={breakEven}
               stroke="#F59E0B"
@@ -1134,12 +1164,17 @@ function PayoffChart({ data, breakEven, optionType }) {
           <Line
             type="linear"
             dataKey="pnl"
-            stroke={optionType === 'call' ? '#10B981' : '#EF4444'}
+            stroke={hasPortfolio ? '#8B5CF6' : (optionType === 'call' ? '#10B981' : '#EF4444')}
             strokeWidth={2}
             dot={false}
           />
         </LineChart>
       </ResponsiveContainer>
+      {hasPortfolio && (
+        <p className="text-xs text-neutral-500 mt-2">
+          Combined P&L across all {portfolio.length} positions at expiration (assumes all expire on the same date for simplicity)
+        </p>
+      )}
     </div>
   );
 }
@@ -1795,6 +1830,8 @@ function App() {
               data={payoffData}
               breakEven={breakEven}
               optionType={values.optionType}
+              portfolio={portfolio}
+              stockPrice={values.stockPrice}
             />
             <PnLHeatmap
               heatmapData={heatmapData}
