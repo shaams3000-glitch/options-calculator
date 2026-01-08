@@ -263,6 +263,87 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate }) {
         }
       }
 
+      // Strategy 5: Diversified Expiries (split across different expiration dates)
+      const uniqueExpiries = [...new Set(allViableOptions.map(o => o.expiry))];
+      if (uniqueExpiries.length >= 2) {
+        const diversifiedExpiries = [];
+        let remaining = Math.min(budget, maxRisk);
+
+        // Get best option for each expiry date
+        for (const expiry of uniqueExpiries.slice(0, 3)) {
+          const optionsForExpiry = allViableOptions.filter(o => o.expiry === expiry);
+          if (optionsForExpiry.length > 0) {
+            // Pick the best return option for this expiry
+            const best = optionsForExpiry[0];
+            if (remaining >= best.costPer100) {
+              const qty = Math.min(
+                Math.floor(remaining / best.costPer100),
+                Math.ceil(budget / (best.costPer100 * uniqueExpiries.length))
+              );
+              if (qty >= 1) {
+                diversifiedExpiries.push({ ...best, qty });
+                remaining -= qty * best.costPer100;
+              }
+            }
+          }
+        }
+
+        if (diversifiedExpiries.length >= 2) {
+          const totalCost = diversifiedExpiries.reduce((sum, p) => sum + p.qty * p.costPer100, 0);
+          const totalProfit = diversifiedExpiries.reduce((sum, p) => sum + p.qty * p.profitPer100, 0);
+          portfolios.push({
+            name: 'Diversified Expiries',
+            description: 'Split across multiple expiration dates to manage time risk',
+            positions: diversifiedExpiries,
+            totalCost,
+            totalProfit,
+            totalReturn: (totalProfit / totalCost) * 100,
+          });
+        }
+      }
+
+      // Strategy 6: Calendar Ladder (mix of near and far expiries with varying strikes)
+      if (uniqueExpiries.length >= 2 && allViableOptions.length >= 3) {
+        const calendarLadder = [];
+        let remaining = Math.min(budget, maxRisk);
+
+        // Near-term aggressive (higher strike, sooner expiry)
+        const nearExpiry = uniqueExpiries[0];
+        const farExpiry = uniqueExpiries[uniqueExpiries.length - 1];
+
+        const nearOptions = allViableOptions.filter(o => o.expiry === nearExpiry && o.returnPct > 30);
+        const farOptions = allViableOptions.filter(o => o.expiry === farExpiry);
+
+        if (nearOptions.length > 0 && farOptions.length > 0) {
+          // Allocate 40% to near-term, 60% to far-term
+          const nearBudget = remaining * 0.4;
+          const farBudget = remaining * 0.6;
+
+          const nearBest = nearOptions[0];
+          const farBest = farOptions.find(o => o.strike <= stockPrice * 1.02) || farOptions[0];
+
+          const nearQty = Math.floor(nearBudget / nearBest.costPer100);
+          const farQty = Math.floor(farBudget / farBest.costPer100);
+
+          if (nearQty >= 1 && farQty >= 1) {
+            calendarLadder.push({ ...nearBest, qty: nearQty });
+            calendarLadder.push({ ...farBest, qty: farQty });
+
+            const totalCost = calendarLadder.reduce((sum, p) => sum + p.qty * p.costPer100, 0);
+            const totalProfit = calendarLadder.reduce((sum, p) => sum + p.qty * p.profitPer100, 0);
+
+            portfolios.push({
+              name: 'Calendar Ladder',
+              description: 'Near-term aggressive + far-term conservative for time diversification',
+              positions: calendarLadder,
+              totalCost,
+              totalProfit,
+              totalReturn: (totalProfit / totalCost) * 100,
+            });
+          }
+        }
+      }
+
       // Remove duplicates and sort by total return
       const uniquePortfolios = portfolios.filter((p, i, arr) =>
         arr.findIndex(x => JSON.stringify(x.positions.map(pos => `${pos.strike}-${pos.qty}`)) ===
@@ -521,12 +602,15 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate }) {
                       <div className="mt-3 space-y-2">
                         {portfolio.positions.map((pos, posIdx) => (
                           <div key={posIdx} className="flex justify-between items-center text-sm bg-neutral-900/50 rounded px-3 py-2">
-                            <div>
-                              <span className={`font-medium ${formData.direction === 'bullish' ? 'text-green-400' : 'text-red-400'}`}>
-                                {pos.qty}x
-                              </span>
-                              <span className="text-white ml-2">${pos.strike} strike</span>
-                              <span className="text-neutral-500 ml-2">@ ${pos.premium.toFixed(2)}</span>
+                            <div className="flex flex-col">
+                              <div>
+                                <span className={`font-medium ${formData.direction === 'bullish' ? 'text-green-400' : 'text-red-400'}`}>
+                                  {pos.qty}x
+                                </span>
+                                <span className="text-white ml-2">${pos.strike} strike</span>
+                                <span className="text-neutral-500 ml-2">@ ${pos.premium.toFixed(2)}</span>
+                              </div>
+                              <span className="text-xs text-blue-400">Exp: {unixToDate(pos.expiry)}</span>
                             </div>
                             <div className="text-right">
                               <span className="text-neutral-400">${(pos.qty * pos.costPer100).toFixed(0)}</span>
@@ -554,14 +638,14 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate }) {
                       </div>
 
                       {/* Action buttons */}
-                      <div className="mt-3 flex gap-2">
+                      <div className="mt-3 flex flex-wrap gap-2">
                         {portfolio.positions.map((pos, posIdx) => (
                           <button
                             key={posIdx}
                             onClick={() => selectSuggestion(portfolio, posIdx)}
-                            className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs"
+                            className="flex-1 min-w-[80px] py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs"
                           >
-                            Load ${pos.strike}
+                            ${pos.strike} ({unixToDate(pos.expiry).slice(5)})
                           </button>
                         ))}
                       </div>
@@ -1209,7 +1293,7 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry }) {
 }
 
 // Saved Positions Component
-function SavedPositions({ positions, onLoad, onDelete }) {
+function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList }) {
   if (positions.length === 0) {
     return (
       <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
@@ -1219,12 +1303,14 @@ function SavedPositions({ positions, onLoad, onDelete }) {
     );
   }
 
+  const isInCompare = (idx) => compareList.includes(idx);
+
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
       <h2 className="text-xl font-semibold mb-4 text-white">Saved Positions</h2>
       <div className="space-y-2 max-h-48 overflow-y-auto">
         {positions.map((pos, idx) => (
-          <div key={idx} className="flex items-center justify-between bg-black/70 rounded-lg p-3">
+          <div key={idx} className={`flex items-center justify-between bg-black/70 rounded-lg p-3 ${isInCompare(idx) ? 'ring-1 ring-purple-500' : ''}`}>
             <div>
               <span className={`font-medium ${pos.optionType === 'call' ? 'text-green-400' : 'text-red-400'}`}>
                 {pos.optionType.toUpperCase()}
@@ -1236,22 +1322,174 @@ function SavedPositions({ positions, onLoad, onDelete }) {
                 {pos.expirationDate}
               </span>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-1">
+              <button
+                onClick={() => onCompare(idx)}
+                className={`px-2 py-1 text-xs rounded transition-colors ${
+                  isInCompare(idx)
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
+                }`}
+                title={isInCompare(idx) ? 'Remove from compare' : 'Add to compare'}
+              >
+                {isInCompare(idx) ? '✓' : '+'}
+              </button>
               <button
                 onClick={() => onLoad(pos)}
-                className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 rounded text-white transition-colors"
+                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white transition-colors"
               >
                 Load
               </button>
               <button
                 onClick={() => onDelete(idx)}
-                className="px-3 py-1 text-sm bg-neutral-700 hover:bg-neutral-900 rounded text-white transition-colors"
+                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded text-white transition-colors"
               >
                 ×
               </button>
             </div>
           </div>
         ))}
+      </div>
+      {compareList.length > 0 && (
+        <p className="text-xs text-purple-400 mt-2">{compareList.length} position(s) selected for comparison</p>
+      )}
+    </div>
+  );
+}
+
+// Compare Chart Component - Compare P&L for multiple positions
+function CompareChart({ positions, currentPosition, stockPrice }) {
+  const colors = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'];
+
+  // Generate comparison data
+  const allPositions = [
+    { ...currentPosition, label: 'Current' },
+    ...positions.map((pos, idx) => ({ ...pos, label: `Position ${idx + 1}` }))
+  ];
+
+  const priceRange = 0.3;
+  const minPrice = Math.max(0, stockPrice * (1 - priceRange));
+  const maxPrice = stockPrice * (1 + priceRange);
+  const step = (maxPrice - minPrice) / 50;
+
+  const data = [];
+  for (let price = minPrice; price <= maxPrice; price += step) {
+    const point = { stockPrice: parseFloat(price.toFixed(2)) };
+    allPositions.forEach((pos, idx) => {
+      let intrinsic;
+      if (pos.optionType === 'call') {
+        intrinsic = Math.max(0, price - pos.strikePrice);
+      } else {
+        intrinsic = Math.max(0, pos.strikePrice - price);
+      }
+      point[`pnl${idx}`] = parseFloat((intrinsic - pos.premium).toFixed(2));
+    });
+    data.push(point);
+  }
+
+  if (positions.length === 0) {
+    return (
+      <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
+        <h2 className="text-xl font-semibold mb-4 text-white">Compare Positions</h2>
+        <p className="text-neutral-400 text-sm">Select positions from "Saved Positions" to compare their P&L charts.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
+      <h2 className="text-xl font-semibold mb-4 text-white">Compare Positions (P&L at Expiry)</h2>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-3 mb-4">
+        {allPositions.map((pos, idx) => (
+          <div key={idx} className="flex items-center gap-2 text-sm">
+            <div className="w-3 h-3 rounded" style={{ backgroundColor: colors[idx % colors.length] }}></div>
+            <span className="text-neutral-300">
+              {pos.label}: {pos.optionType.toUpperCase()} ${pos.strikePrice} ({pos.expirationDate})
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+          <XAxis
+            dataKey="stockPrice"
+            stroke="#9CA3AF"
+            label={{ value: 'Stock Price ($)', position: 'bottom', fill: '#9CA3AF' }}
+          />
+          <YAxis
+            stroke="#9CA3AF"
+            label={{ value: 'P&L ($)', angle: -90, position: 'insideLeft', fill: '#9CA3AF' }}
+          />
+          <RechartsTooltip
+            contentStyle={{
+              backgroundColor: '#1F2937',
+              border: '1px solid #374151',
+              borderRadius: '8px',
+            }}
+            labelStyle={{ color: '#9CA3AF' }}
+            formatter={(value, name) => {
+              const idx = parseInt(name.replace('pnl', ''));
+              return [`$${value.toFixed(2)}`, allPositions[idx]?.label || name];
+            }}
+            labelFormatter={(label) => `Stock: $${label}`}
+          />
+          <ReferenceLine y={0} stroke="#6B7280" strokeDasharray="5 5" />
+          {allPositions.map((pos, idx) => (
+            <Line
+              key={idx}
+              type="linear"
+              dataKey={`pnl${idx}`}
+              stroke={colors[idx % colors.length]}
+              strokeWidth={idx === 0 ? 3 : 2}
+              strokeDasharray={idx === 0 ? undefined : '5 5'}
+              dot={false}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+
+      {/* Comparison Table */}
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-neutral-400 border-b border-neutral-700">
+              <th className="p-2 text-left">Position</th>
+              <th className="p-2 text-center">Type</th>
+              <th className="p-2 text-center">Strike</th>
+              <th className="p-2 text-center">Premium</th>
+              <th className="p-2 text-center">Expiry</th>
+              <th className="p-2 text-center">Break-Even</th>
+            </tr>
+          </thead>
+          <tbody>
+            {allPositions.map((pos, idx) => {
+              const breakEven = pos.optionType === 'call'
+                ? pos.strikePrice + pos.premium
+                : pos.strikePrice - pos.premium;
+              return (
+                <tr key={idx} className="border-b border-neutral-800">
+                  <td className="p-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded" style={{ backgroundColor: colors[idx % colors.length] }}></div>
+                      <span className="text-white">{pos.label}</span>
+                    </div>
+                  </td>
+                  <td className={`p-2 text-center font-medium ${pos.optionType === 'call' ? 'text-green-400' : 'text-red-400'}`}>
+                    {pos.optionType.toUpperCase()}
+                  </td>
+                  <td className="p-2 text-center text-white">${pos.strikePrice}</td>
+                  <td className="p-2 text-center text-white">${pos.premium}</td>
+                  <td className="p-2 text-center text-neutral-400">{pos.expirationDate}</td>
+                  <td className="p-2 text-center text-yellow-400">${breakEven.toFixed(2)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1273,6 +1511,8 @@ function App() {
     const saved = localStorage.getItem('optionsPositions');
     return saved ? JSON.parse(saved) : [];
   });
+
+  const [compareList, setCompareList] = useState([]);
 
   // Calculate derived values
   const daysToExpiry = Math.max(0, daysBetween(new Date(), new Date(values.expirationDate)));
@@ -1317,6 +1557,18 @@ function App() {
 
   const handleDeletePosition = useCallback((index) => {
     setSavedPositions((prev) => prev.filter((_, i) => i !== index));
+    setCompareList((prev) => prev.filter((i) => i !== index).map((i) => i > index ? i - 1 : i));
+  }, []);
+
+  const handleToggleCompare = useCallback((index) => {
+    setCompareList((prev) => {
+      if (prev.includes(index)) {
+        return prev.filter((i) => i !== index);
+      } else if (prev.length < 4) {
+        return [...prev, index];
+      }
+      return prev;
+    });
   }, []);
 
   const handleSelectOption = useCallback((optionData) => {
@@ -1372,6 +1624,8 @@ function App() {
               positions={savedPositions}
               onLoad={handleLoadPosition}
               onDelete={handleDeletePosition}
+              onCompare={handleToggleCompare}
+              compareList={compareList}
             />
           </div>
 
@@ -1393,6 +1647,11 @@ function App() {
               dateIntervals={dateIntervals}
               premium={values.premium}
               daysToExpiry={daysToExpiry}
+            />
+            <CompareChart
+              positions={compareList.map((idx) => savedPositions[idx]).filter(Boolean)}
+              currentPosition={values}
+              stockPrice={values.stockPrice}
             />
           </div>
         </div>
