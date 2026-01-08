@@ -71,6 +71,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
     targetPriceLow: '',
     targetPriceHigh: '',
     selectedExpiries: [],
+    multiExpiryPreference: '', // 'spread' = positions across expiries, 'single' = all same expiry
     optimization: '', // 'max_return', 'risk_reward', 'diversified'
   });
   const [loading, setLoading] = useState(false);
@@ -124,6 +125,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
       const targetHigh = parseFloat(formData.targetPriceHigh);
       const optimization = formData.optimization || 'max_return';
       const selectedExpiries = formData.selectedExpiries;
+      const multiExpiryPref = formData.multiExpiryPreference || 'single';
 
       // Collect all viable options across ALL selected expiries (no limit)
       const allViableOptions = [];
@@ -169,6 +171,33 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
             });
           }
         }
+      }
+
+      // If user prefers single expiry, filter to only the best expiry date
+      let optionsToUse = allViableOptions;
+      if (multiExpiryPref === 'single' && selectedExpiries.length > 1) {
+        // Find which expiry has the best average return
+        const expiryReturns = {};
+        for (const opt of allViableOptions) {
+          if (!expiryReturns[opt.expiry]) {
+            expiryReturns[opt.expiry] = { total: 0, count: 0 };
+          }
+          expiryReturns[opt.expiry].total += opt.returnPct;
+          expiryReturns[opt.expiry].count += 1;
+        }
+
+        // Pick expiry with best average return
+        let bestExpiry = selectedExpiries[0];
+        let bestAvg = -Infinity;
+        for (const [expiry, data] of Object.entries(expiryReturns)) {
+          const avg = data.total / data.count;
+          if (avg > bestAvg) {
+            bestAvg = avg;
+            bestExpiry = parseInt(expiry);
+          }
+        }
+
+        optionsToUse = allViableOptions.filter(o => o.expiry === bestExpiry);
       }
 
       // Generate optimal multi-position portfolio based on optimization preference
@@ -238,7 +267,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
       const portfolios = [];
 
       // Generate primary recommended portfolio based on user's optimization preference
-      const primaryPortfolio = generateOptimalPortfolio(allViableOptions, Math.min(budget, maxRisk), optimization);
+      const primaryPortfolio = generateOptimalPortfolio(optionsToUse, Math.min(budget, maxRisk), optimization);
       if (primaryPortfolio) {
         const optimizationNames = {
           max_return: { name: 'Maximum Return', desc: 'Optimized for highest potential ROI at your target price' },
@@ -256,7 +285,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
       // Generate alternative portfolios with different strategies
       const alternatives = ['max_return', 'risk_reward', 'diversified'].filter(o => o !== optimization);
       for (const alt of alternatives) {
-        const altPortfolio = generateOptimalPortfolio(allViableOptions, Math.min(budget, maxRisk), alt);
+        const altPortfolio = generateOptimalPortfolio(optionsToUse, Math.min(budget, maxRisk), alt);
         if (altPortfolio && altPortfolio.positions.length > 0) {
           const altNames = {
             max_return: { name: 'High Return Focus', desc: 'Alternative focused on maximum percentage gains' },
@@ -272,8 +301,8 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
       }
 
       // Add a single-position "simple" option for comparison
-      if (allViableOptions.length > 0) {
-        const best = allViableOptions.sort((a, b) => b.returnPct - a.returnPct)[0];
+      if (optionsToUse.length > 0) {
+        const best = [...optionsToUse].sort((a, b) => b.returnPct - a.returnPct)[0];
         const qty = Math.min(best.maxQty, Math.floor(maxRisk / best.costPer100));
         if (qty >= 1) {
           portfolios.push({
@@ -295,7 +324,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
       });
 
       setSuggestions(portfolios);
-      setStep(7);
+      setStep(8);
     } catch (error) {
       console.error('Error:', error);
     } finally {
@@ -345,6 +374,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
       targetPriceLow: '',
       targetPriceHigh: '',
       selectedExpiries: [],
+      multiExpiryPreference: '',
       optimization: '',
     });
   };
@@ -476,7 +506,16 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
             <div className="flex gap-2">
               <button onClick={() => setStep(2)} className="px-4 py-2 text-neutral-400">Back</button>
               <button
-                onClick={() => setStep(4)}
+                onClick={() => {
+                  // If multiple expiries selected, ask about multi-expiry preference
+                  // Otherwise skip to budget step
+                  if (formData.selectedExpiries.length > 1) {
+                    setStep(4);
+                  } else {
+                    handleInputChange('multiExpiryPreference', 'single');
+                    setStep(5);
+                  }
+                }}
                 disabled={formData.selectedExpiries.length === 0}
                 className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white"
               >
@@ -487,6 +526,53 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
         );
 
       case 4:
+        // Multi-expiry preference - only shown if multiple expiries selected
+        return (
+          <>
+            <p className="text-neutral-400 mb-4">
+              You selected {formData.selectedExpiries.length} expiry dates. How would you like positions distributed?
+            </p>
+            <div className="space-y-2 mb-4">
+              {[
+                {
+                  value: 'spread',
+                  label: 'Spread across expiries',
+                  desc: 'Diversify with positions at different expiry dates for time-based risk management'
+                },
+                {
+                  value: 'single',
+                  label: 'Same expiry date',
+                  desc: 'All positions expire together - simpler to manage, concentrated timing'
+                },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => handleInputChange('multiExpiryPreference', opt.value)}
+                  className={`w-full p-4 rounded-lg border text-left transition-all ${
+                    formData.multiExpiryPreference === opt.value
+                      ? 'border-blue-500 bg-blue-500/20'
+                      : 'border-neutral-700 hover:border-neutral-600'
+                  }`}
+                >
+                  <div className="font-medium text-white">{opt.label}</div>
+                  <div className="text-xs text-neutral-400">{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setStep(3)} className="px-4 py-2 text-neutral-400">Back</button>
+              <button
+                onClick={() => setStep(5)}
+                disabled={!formData.multiExpiryPreference}
+                className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white"
+              >
+                Next
+              </button>
+            </div>
+          </>
+        );
+
+      case 5:
         return (
           <>
             <p className="text-neutral-400 mb-4">What is your total budget for this trade?</p>
@@ -501,9 +587,9 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
               />
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setStep(3)} className="px-4 py-2 text-neutral-400">Back</button>
+              <button onClick={() => formData.selectedExpiries.length > 1 ? setStep(4) : setStep(3)} className="px-4 py-2 text-neutral-400">Back</button>
               <button
-                onClick={() => setStep(5)}
+                onClick={() => setStep(6)}
                 disabled={!formData.budget}
                 className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white"
               >
@@ -513,7 +599,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
           </>
         );
 
-      case 5:
+      case 6:
         return (
           <>
             <p className="text-neutral-400 mb-4">How much are you willing to lose (max risk)?</p>
@@ -529,9 +615,9 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
             </div>
             <p className="text-xs text-neutral-500 mb-4">This is the maximum you could lose if the trade goes against you</p>
             <div className="flex gap-2">
-              <button onClick={() => setStep(4)} className="px-4 py-2 text-neutral-400">Back</button>
+              <button onClick={() => setStep(5)} className="px-4 py-2 text-neutral-400">Back</button>
               <button
-                onClick={() => setStep(6)}
+                onClick={() => setStep(7)}
                 disabled={!formData.maxRisk}
                 className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white"
               >
@@ -541,7 +627,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
           </>
         );
 
-      case 6:
+      case 7:
         return (
           <>
             <p className="text-neutral-400 mb-4">What's your priority for this trade?</p>
@@ -569,7 +655,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
               Based on your {formData.direction} outlook and ${formData.budget} budget, we'll find the optimal portfolio.
             </p>
             <div className="flex gap-2">
-              <button onClick={() => setStep(5)} className="px-4 py-2 text-neutral-400">Back</button>
+              <button onClick={() => setStep(6)} className="px-4 py-2 text-neutral-400">Back</button>
               <button
                 onClick={generateSuggestions}
                 disabled={!formData.optimization}
@@ -581,7 +667,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
           </>
         );
 
-      case 7:
+      case 8:
         return (
           <>
             {suggestions.length > 0 ? (
