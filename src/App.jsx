@@ -121,67 +121,156 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate }) {
       const maxRisk = parseFloat(formData.maxRisk) || budget;
       const targetLow = parseFloat(formData.targetPriceLow);
       const targetHigh = parseFloat(formData.targetPriceHigh);
+      const targetPrice = formData.direction === 'bullish' ? targetHigh : targetLow;
       const selectedExpiries = formData.selectedExpiries;
 
-      // Fetch options for each selected expiry and find best matches
-      const suggestionList = [];
+      // Collect all viable options across all selected expiries
+      const allViableOptions = [];
 
-      for (const expiry of selectedExpiries.slice(0, 3)) {
+      for (const expiry of selectedExpiries.slice(0, 5)) {
         const data = await fetchOptionsChain(formData.ticker, expiry);
-        const calls = data.options?.calls || [];
-        const puts = data.options?.puts || [];
+        const options = formData.direction === 'bullish'
+          ? (data.options?.calls || [])
+          : (data.options?.puts || []);
 
-        if (formData.direction === 'bullish') {
-          // Find calls with strike near target price, within budget
-          const matchingCalls = calls.filter(c => {
-            const price = getMidPrice(c) * 100;
-            return c.strike >= stockPrice && c.strike <= targetHigh && price <= budget && price <= maxRisk;
-          });
+        for (const opt of options) {
+          const premium = getMidPrice(opt);
+          const costPer100 = premium * 100;
 
-          if (matchingCalls.length > 0) {
-            // Sort by strike closest to target high
-            matchingCalls.sort((a, b) => Math.abs(a.strike - targetHigh) - Math.abs(b.strike - targetHigh));
-            const best = matchingCalls[0];
-            const premium = getMidPrice(best);
-            const potentialProfit = targetHigh - best.strike - premium;
+          if (costPer100 <= 0 || costPer100 > budget) continue;
 
-            suggestionList.push({
-              type: `Call - ${unixToDate(expiry)}`,
-              option: best,
-              optionType: 'call',
-              expiry: expiry,
-              reason: `$${best.strike} strike. Cost: $${(premium * 100).toFixed(0)}. If stock hits $${targetHigh}, potential profit: $${(potentialProfit * 100).toFixed(0)} (${((potentialProfit / premium) * 100).toFixed(0)}% return)`,
-              maxLoss: premium * 100,
-              potentialGain: potentialProfit * 100,
-            });
+          // Calculate potential profit at target price
+          let intrinsicAtTarget;
+          if (formData.direction === 'bullish') {
+            if (opt.strike > targetHigh) continue; // Skip OTM calls above target
+            intrinsicAtTarget = Math.max(0, targetHigh - opt.strike);
+          } else {
+            if (opt.strike < targetLow) continue; // Skip OTM puts below target
+            intrinsicAtTarget = Math.max(0, opt.strike - targetLow);
           }
-        } else if (formData.direction === 'bearish') {
-          // Find puts with strike near target price, within budget
-          const matchingPuts = puts.filter(p => {
-            const price = getMidPrice(p) * 100;
-            return p.strike <= stockPrice && p.strike >= targetLow && price <= budget && price <= maxRisk;
-          });
 
-          if (matchingPuts.length > 0) {
-            matchingPuts.sort((a, b) => Math.abs(a.strike - targetLow) - Math.abs(b.strike - targetLow));
-            const best = matchingPuts[0];
-            const premium = getMidPrice(best);
-            const potentialProfit = best.strike - targetLow - premium;
+          const profitPer100 = (intrinsicAtTarget - premium) * 100;
+          const returnPct = (profitPer100 / costPer100) * 100;
+          const maxQty = Math.floor(budget / costPer100);
 
-            suggestionList.push({
-              type: `Put - ${unixToDate(expiry)}`,
-              option: best,
-              optionType: 'put',
-              expiry: expiry,
-              reason: `$${best.strike} strike. Cost: $${(premium * 100).toFixed(0)}. If stock drops to $${targetLow}, potential profit: $${(potentialProfit * 100).toFixed(0)} (${((potentialProfit / premium) * 100).toFixed(0)}% return)`,
-              maxLoss: premium * 100,
-              potentialGain: potentialProfit * 100,
+          if (maxQty >= 1 && returnPct > -50) {
+            allViableOptions.push({
+              option: opt,
+              expiry,
+              premium,
+              costPer100,
+              profitPer100,
+              returnPct,
+              maxQty,
+              strike: opt.strike,
             });
           }
         }
       }
 
-      setSuggestions(suggestionList);
+      // Sort by return percentage
+      allViableOptions.sort((a, b) => b.returnPct - a.returnPct);
+
+      // Generate portfolio suggestions
+      const portfolios = [];
+
+      // Strategy 1: Single best option (max contracts)
+      if (allViableOptions.length > 0) {
+        const best = allViableOptions[0];
+        const qty = Math.min(best.maxQty, Math.floor(maxRisk / best.costPer100));
+        if (qty >= 1) {
+          portfolios.push({
+            name: 'Highest Return',
+            description: 'Maximize percentage return with single strike',
+            positions: [{ ...best, qty }],
+            totalCost: qty * best.costPer100,
+            totalProfit: qty * best.profitPer100,
+            totalReturn: best.returnPct,
+          });
+        }
+      }
+
+      // Strategy 2: Diversified across strikes (split budget)
+      if (allViableOptions.length >= 2) {
+        const diversified = [];
+        let remaining = Math.min(budget, maxRisk);
+        const uniqueStrikes = [...new Set(allViableOptions.map(o => o.strike))].slice(0, 3);
+
+        for (const strike of uniqueStrikes) {
+          const opt = allViableOptions.find(o => o.strike === strike);
+          if (opt && remaining >= opt.costPer100) {
+            const qty = Math.min(Math.floor(remaining / opt.costPer100), Math.ceil(budget / (opt.costPer100 * uniqueStrikes.length)));
+            if (qty >= 1) {
+              diversified.push({ ...opt, qty });
+              remaining -= qty * opt.costPer100;
+            }
+          }
+        }
+
+        if (diversified.length >= 2) {
+          const totalCost = diversified.reduce((sum, p) => sum + p.qty * p.costPer100, 0);
+          const totalProfit = diversified.reduce((sum, p) => sum + p.qty * p.profitPer100, 0);
+          portfolios.push({
+            name: 'Diversified Strikes',
+            description: 'Split across multiple strike prices for balanced risk',
+            positions: diversified,
+            totalCost,
+            totalProfit,
+            totalReturn: (totalProfit / totalCost) * 100,
+          });
+        }
+      }
+
+      // Strategy 3: Conservative (higher probability, lower strike for calls)
+      const conservative = allViableOptions.filter(o =>
+        formData.direction === 'bullish'
+          ? o.strike <= stockPrice * 1.02  // ATM or slightly ITM calls
+          : o.strike >= stockPrice * 0.98  // ATM or slightly ITM puts
+      );
+      if (conservative.length > 0) {
+        const best = conservative.sort((a, b) => b.returnPct - a.returnPct)[0];
+        const qty = Math.min(best.maxQty, Math.floor(maxRisk / best.costPer100));
+        if (qty >= 1) {
+          portfolios.push({
+            name: 'Conservative',
+            description: 'Near-the-money for higher probability of profit',
+            positions: [{ ...best, qty }],
+            totalCost: qty * best.costPer100,
+            totalProfit: qty * best.profitPer100,
+            totalReturn: best.returnPct,
+          });
+        }
+      }
+
+      // Strategy 4: Aggressive (OTM for max leverage)
+      const aggressive = allViableOptions.filter(o =>
+        formData.direction === 'bullish'
+          ? o.strike >= stockPrice * 1.05 && o.returnPct > 50
+          : o.strike <= stockPrice * 0.95 && o.returnPct > 50
+      );
+      if (aggressive.length > 0) {
+        const best = aggressive[0];
+        const qty = Math.min(best.maxQty, Math.floor(maxRisk / best.costPer100));
+        if (qty >= 1) {
+          portfolios.push({
+            name: 'Aggressive',
+            description: 'Out-of-the-money for maximum leverage',
+            positions: [{ ...best, qty }],
+            totalCost: qty * best.costPer100,
+            totalProfit: qty * best.profitPer100,
+            totalReturn: best.returnPct,
+          });
+        }
+      }
+
+      // Remove duplicates and sort by total return
+      const uniquePortfolios = portfolios.filter((p, i, arr) =>
+        arr.findIndex(x => JSON.stringify(x.positions.map(pos => `${pos.strike}-${pos.qty}`)) ===
+                         JSON.stringify(p.positions.map(pos => `${pos.strike}-${pos.qty}`))) === i
+      );
+      uniquePortfolios.sort((a, b) => b.totalReturn - a.totalReturn);
+
+      setSuggestions(uniquePortfolios);
       setStep(6);
     } catch (error) {
       console.error('Error:', error);
@@ -190,15 +279,20 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate }) {
     }
   };
 
-  const selectSuggestion = (suggestion) => {
-    const formatted = formatOptionData(suggestion.option);
+  const selectSuggestion = (portfolio, positionIndex = 0) => {
+    // Load the first position (or specified position) into the calculator
+    const position = portfolio.positions[positionIndex];
+    const formatted = formatOptionData(position.option);
     onSelectOption({
       strikePrice: formatted.strike,
-      premium: getMidPrice(suggestion.option),
+      premium: position.premium,
       iv: formatted.impliedVolatility,
-      expirationDate: unixToDate(suggestion.option.expiration),
-      optionType: suggestion.optionType,
+      expirationDate: unixToDate(position.option.expiration),
+      optionType: formData.direction === 'bullish' ? 'call' : 'put',
     });
+  };
+
+  const resetBuilder = () => {
     setStep(0);
     setSuggestions([]);
     setFormData({
@@ -306,21 +400,36 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate }) {
         return (
           <>
             <p className="text-neutral-400 mb-4">When do you expect this price target? (Select expiry dates)</p>
-            <div className="max-h-48 overflow-y-auto space-y-2 mb-4">
-              {availableExpiries.slice(0, 12).map(exp => (
-                <button
-                  key={exp}
-                  onClick={() => toggleExpiry(exp)}
-                  className={`w-full p-3 rounded-lg border text-left transition-all ${
-                    formData.selectedExpiries.includes(exp)
-                      ? 'border-blue-500 bg-blue-500/20'
-                      : 'border-neutral-700 hover:border-neutral-600'
-                  }`}
-                >
-                  <span className="text-white">{unixToDate(exp)}</span>
-                </button>
-              ))}
+            <div className="max-h-64 overflow-y-auto space-y-2 mb-4">
+              {availableExpiries.map(exp => {
+                const expDate = new Date(exp * 1000);
+                const now = new Date();
+                const daysOut = Math.ceil((expDate - now) / (1000 * 60 * 60 * 24));
+                const weeksOut = Math.floor(daysOut / 7);
+                const monthsOut = Math.floor(daysOut / 30);
+                let timeLabel = `${daysOut}d`;
+                if (monthsOut >= 1) timeLabel = `${monthsOut}mo`;
+                else if (weeksOut >= 1) timeLabel = `${weeksOut}w`;
+
+                return (
+                  <button
+                    key={exp}
+                    onClick={() => toggleExpiry(exp)}
+                    className={`w-full p-3 rounded-lg border text-left transition-all ${
+                      formData.selectedExpiries.includes(exp)
+                        ? 'border-blue-500 bg-blue-500/20'
+                        : 'border-neutral-700 hover:border-neutral-600'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="text-white">{unixToDate(exp)}</span>
+                      <span className="text-neutral-500 text-sm">{timeLabel}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
+            <p className="text-xs text-neutral-500 mb-3">{availableExpiries.length} expiry dates available (up to 12+ months)</p>
             <div className="flex gap-2">
               <button onClick={() => setStep(2)} className="px-4 py-2 text-neutral-400">Back</button>
               <button
@@ -394,27 +503,68 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate }) {
           <>
             {suggestions.length > 0 ? (
               <>
-                <p className="text-neutral-400 mb-4">Based on your criteria, here are matching options:</p>
-                <div className="space-y-3">
-                  {suggestions.map((s, idx) => (
+                <p className="text-neutral-400 mb-4">Portfolio strategies for your ${formData.budget} budget:</p>
+                <div className="space-y-4">
+                  {suggestions.map((portfolio, idx) => (
                     <div key={idx} className="bg-black/70 rounded-lg p-4 border border-neutral-800">
                       <div className="flex justify-between items-start mb-2">
-                        <span className={`font-medium ${s.optionType === 'call' ? 'text-green-400' : 'text-red-400'}`}>
-                          {s.type}
+                        <div>
+                          <span className="font-semibold text-white">{portfolio.name}</span>
+                          <p className="text-xs text-neutral-500">{portfolio.description}</p>
+                        </div>
+                        <span className={`font-bold ${portfolio.totalReturn >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {portfolio.totalReturn >= 0 ? '+' : ''}{portfolio.totalReturn.toFixed(0)}%
                         </span>
-                        <span className="text-white font-medium">${s.option.strike}</span>
                       </div>
-                      <p className="text-sm text-neutral-400 mb-2">{s.reason}</p>
-                      <div className="flex justify-between text-xs mb-3">
-                        <span className="text-red-400">Max Loss: ${s.maxLoss.toFixed(0)}</span>
-                        <span className="text-green-400">Potential Gain: ${s.potentialGain.toFixed(0)}</span>
+
+                      {/* Positions breakdown */}
+                      <div className="mt-3 space-y-2">
+                        {portfolio.positions.map((pos, posIdx) => (
+                          <div key={posIdx} className="flex justify-between items-center text-sm bg-neutral-900/50 rounded px-3 py-2">
+                            <div>
+                              <span className={`font-medium ${formData.direction === 'bullish' ? 'text-green-400' : 'text-red-400'}`}>
+                                {pos.qty}x
+                              </span>
+                              <span className="text-white ml-2">${pos.strike} strike</span>
+                              <span className="text-neutral-500 ml-2">@ ${pos.premium.toFixed(2)}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-neutral-400">${(pos.qty * pos.costPer100).toFixed(0)}</span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <button
-                        onClick={() => selectSuggestion(s)}
-                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
-                      >
-                        Use This Option
-                      </button>
+
+                      {/* Summary */}
+                      <div className="mt-3 pt-3 border-t border-neutral-700 grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <div className="text-neutral-500">Total Cost</div>
+                          <div className="text-white font-medium">${portfolio.totalCost.toFixed(0)}</div>
+                        </div>
+                        <div>
+                          <div className="text-neutral-500">Max Loss</div>
+                          <div className="text-red-400 font-medium">-${portfolio.totalCost.toFixed(0)}</div>
+                        </div>
+                        <div>
+                          <div className="text-neutral-500">Target Profit</div>
+                          <div className="text-green-400 font-medium">
+                            {portfolio.totalProfit >= 0 ? '+' : ''}${portfolio.totalProfit.toFixed(0)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="mt-3 flex gap-2">
+                        {portfolio.positions.map((pos, posIdx) => (
+                          <button
+                            key={posIdx}
+                            onClick={() => selectSuggestion(portfolio, posIdx)}
+                            className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-xs"
+                          >
+                            Load ${pos.strike}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -423,7 +573,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate }) {
               <p className="text-neutral-400">No options found matching your criteria. Try adjusting your targets or budget.</p>
             )}
             <button
-              onClick={() => { setStep(0); setSuggestions([]); setFormData({ ticker: '', direction: '', budget: '', maxRisk: '', targetPriceLow: '', targetPriceHigh: '', selectedExpiries: [] }); }}
+              onClick={resetBuilder}
               className="w-full mt-4 py-2 text-neutral-400 hover:text-white"
             >
               Start Over
