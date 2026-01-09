@@ -16,6 +16,12 @@ import {
   generatePayoffData,
   generateHeatmapData,
   daysBetween,
+  calculateStrategyPnL,
+  calculateStrategyGreeks,
+  generateStrategyPayoffData,
+  generateMultiDatePayoffData,
+  calculateStrategyMetrics,
+  STRATEGY_TEMPLATES,
 } from './utils/blackScholes';
 import {
   fetchOptionsChain,
@@ -1081,117 +1087,27 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
   );
 }
 
-// Strategy Templates Component
-function StrategyTemplates({ onBuildStrategy }) {
+// Strategy Builder Component - Build multi-leg strategies with real options data
+function StrategyBuilder({ onLoadStrategy, onStockPriceUpdate }) {
   const [expanded, setExpanded] = useState(false);
+  const [step, setStep] = useState(0); // 0: select strategy, 1: configure, 2: preview
+  const [selectedStrategy, setSelectedStrategy] = useState(null);
+  const [ticker, setTicker] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [optionsData, setOptionsData] = useState(null);
+  const [selectedExpiry, setSelectedExpiry] = useState('');
+  const [baseStrike, setBaseStrike] = useState(0);
+  const [strikeWidth, setStrikeWidth] = useState(5);
+  const [builtLegs, setBuiltLegs] = useState([]);
+  const [metrics, setMetrics] = useState(null);
 
-  const strategies = [
-    {
-      name: 'Long Call',
-      type: 'bullish',
-      legs: 1,
-      description: 'Buy a call option. Profit if stock rises above strike + premium.',
-      maxProfit: 'Unlimited',
-      maxLoss: 'Premium paid',
-      icon: '📈',
-      build: (strike, expiry) => [
-        { optionType: 'call', action: 'buy', strikeOffset: 0 }
-      ]
-    },
-    {
-      name: 'Long Put',
-      type: 'bearish',
-      legs: 1,
-      description: 'Buy a put option. Profit if stock falls below strike - premium.',
-      maxProfit: 'Strike - Premium',
-      maxLoss: 'Premium paid',
-      icon: '📉',
-      build: (strike, expiry) => [
-        { optionType: 'put', action: 'buy', strikeOffset: 0 }
-      ]
-    },
-    {
-      name: 'Bull Call Spread',
-      type: 'bullish',
-      legs: 2,
-      description: 'Buy lower strike call, sell higher strike call. Limited risk & reward.',
-      maxProfit: 'Strike difference - Net debit',
-      maxLoss: 'Net debit',
-      icon: '🐂',
-      build: (strike, expiry) => [
-        { optionType: 'call', action: 'buy', strikeOffset: 0 },
-        { optionType: 'call', action: 'sell', strikeOffset: 5 }
-      ]
-    },
-    {
-      name: 'Bear Put Spread',
-      type: 'bearish',
-      legs: 2,
-      description: 'Buy higher strike put, sell lower strike put. Limited risk & reward.',
-      maxProfit: 'Strike difference - Net debit',
-      maxLoss: 'Net debit',
-      icon: '🐻',
-      build: (strike, expiry) => [
-        { optionType: 'put', action: 'buy', strikeOffset: 0 },
-        { optionType: 'put', action: 'sell', strikeOffset: -5 }
-      ]
-    },
-    {
-      name: 'Straddle',
-      type: 'neutral',
-      legs: 2,
-      description: 'Buy call AND put at same strike. Profit from big moves either direction.',
-      maxProfit: 'Unlimited',
-      maxLoss: 'Total premium paid',
-      icon: '↕️',
-      build: (strike, expiry) => [
-        { optionType: 'call', action: 'buy', strikeOffset: 0 },
-        { optionType: 'put', action: 'buy', strikeOffset: 0 }
-      ]
-    },
-    {
-      name: 'Strangle',
-      type: 'neutral',
-      legs: 2,
-      description: 'Buy OTM call AND OTM put. Cheaper than straddle, needs bigger move.',
-      maxProfit: 'Unlimited',
-      maxLoss: 'Total premium paid',
-      icon: '🔀',
-      build: (strike, expiry) => [
-        { optionType: 'call', action: 'buy', strikeOffset: 5 },
-        { optionType: 'put', action: 'buy', strikeOffset: -5 }
-      ]
-    },
-    {
-      name: 'Iron Condor',
-      type: 'neutral',
-      legs: 4,
-      description: 'Sell OTM put spread + OTM call spread. Profit if stock stays in range.',
-      maxProfit: 'Net credit received',
-      maxLoss: 'Wing width - Credit',
-      icon: '🦅',
-      build: (strike, expiry) => [
-        { optionType: 'put', action: 'buy', strikeOffset: -10 },
-        { optionType: 'put', action: 'sell', strikeOffset: -5 },
-        { optionType: 'call', action: 'sell', strikeOffset: 5 },
-        { optionType: 'call', action: 'buy', strikeOffset: 10 }
-      ]
-    },
-    {
-      name: 'Butterfly',
-      type: 'neutral',
-      legs: 4,
-      description: 'Buy 1 lower, sell 2 middle, buy 1 higher. Max profit if stock at middle strike.',
-      maxProfit: 'Wing width - Net debit',
-      maxLoss: 'Net debit',
-      icon: '🦋',
-      build: (strike, expiry) => [
-        { optionType: 'call', action: 'buy', strikeOffset: -5 },
-        { optionType: 'call', action: 'sell', strikeOffset: 0, qty: 2 },
-        { optionType: 'call', action: 'buy', strikeOffset: 5 }
-      ]
-    }
-  ];
+  const strategyIcons = {
+    longCall: '📈', longPut: '📉', coveredCall: '💰',
+    bullCallSpread: '🐂', bearPutSpread: '🐻', bullPutSpread: '🟢', bearCallSpread: '🔴',
+    straddle: '↕️', strangle: '🔀', ironCondor: '🦅', ironButterfly: '🦋',
+    callButterfly: '🦋', putButterfly: '🦋', calendarSpread: '📅', diagonalSpread: '📐'
+  };
 
   const getTypeColor = (type) => {
     switch (type) {
@@ -1202,44 +1118,351 @@ function StrategyTemplates({ onBuildStrategy }) {
     }
   };
 
+  const handleSelectStrategy = (key, strategy) => {
+    setSelectedStrategy({ key, ...strategy });
+    setStep(1);
+    setBuiltLegs([]);
+    setMetrics(null);
+  };
+
+  const handleFetchOptions = async () => {
+    if (!ticker) return;
+    setLoading(true);
+    setError('');
+    try {
+      const data = await fetchOptionsChain(ticker);
+      setOptionsData(data);
+      onStockPriceUpdate(data.underlyingPrice);
+      if (data.expirationDates.length > 0) {
+        setSelectedExpiry(data.expirationDates[0]);
+      }
+      // Set base strike to ATM
+      const atmStrike = data.strikes?.reduce((prev, curr) =>
+        Math.abs(curr - data.underlyingPrice) < Math.abs(prev - data.underlyingPrice) ? curr : prev
+      , data.strikes?.[0] || data.underlyingPrice);
+      setBaseStrike(atmStrike || Math.round(data.underlyingPrice));
+    } catch (err) {
+      setError(err.message || 'Failed to fetch options');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const findOptionByStrike = (strike, optionType, options) => {
+    const chain = optionType === 'call' ? options?.calls : options?.puts;
+    if (!chain) return null;
+    // Find closest strike
+    return chain.reduce((prev, curr) =>
+      Math.abs(curr.strike - strike) < Math.abs(prev.strike - strike) ? curr : prev
+    , chain[0]);
+  };
+
+  const handleBuildStrategy = async () => {
+    if (!selectedStrategy || !optionsData) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      // Fetch options for selected expiry
+      const data = await fetchOptionsChain(ticker, selectedExpiry);
+      const options = data.options;
+
+      // Build legs from template
+      const templateLegs = selectedStrategy.buildLegs(baseStrike);
+      const legs = [];
+
+      for (const tLeg of templateLegs) {
+        const targetStrike = baseStrike + (tLeg.strikeOffset * (strikeWidth / 5));
+        const option = findOptionByStrike(targetStrike, tLeg.optionType, options);
+
+        if (!option) {
+          throw new Error(`Could not find ${tLeg.optionType} at strike ~$${targetStrike}`);
+        }
+
+        const premium = getMidPrice(option);
+        legs.push({
+          optionType: tLeg.optionType,
+          action: tLeg.action,
+          strike: option.strike,
+          premium,
+          qty: tLeg.qty || 1,
+          expiration: unixToDate(option.expiration),
+          iv: (option.impliedVolatility || 0.3),
+          ticker: ticker.toUpperCase(),
+          stockPrice: data.underlyingPrice,
+        });
+      }
+
+      setBuiltLegs(legs);
+
+      // Calculate metrics
+      const strategyMetrics = calculateStrategyMetrics(legs, data.underlyingPrice);
+      setMetrics(strategyMetrics);
+      setStep(2);
+    } catch (err) {
+      setError(err.message || 'Failed to build strategy');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLoadToCalculator = () => {
+    if (builtLegs.length === 0) return;
+
+    // Convert legs to portfolio format
+    const portfolioPositions = builtLegs.map(leg => ({
+      ticker: leg.ticker,
+      stockPrice: leg.stockPrice,
+      strikePrice: leg.strike,
+      premium: leg.premium,
+      optionType: leg.optionType,
+      action: leg.action,
+      expirationDate: leg.expiration,
+      iv: leg.iv * 100,
+      qty: leg.qty,
+      costPer100: leg.action === 'buy' ? leg.premium * 100 : -leg.premium * 100,
+    }));
+
+    onLoadStrategy(portfolioPositions, ticker.toUpperCase());
+    setExpanded(false);
+    setStep(0);
+  };
+
+  const resetBuilder = () => {
+    setStep(0);
+    setSelectedStrategy(null);
+    setBuiltLegs([]);
+    setMetrics(null);
+    setError('');
+  };
+
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex justify-between items-center"
       >
-        <h2 className="text-xl font-semibold text-white">Strategy Templates</h2>
+        <h2 className="text-xl font-semibold text-white">Strategy Builder</h2>
         <span className="text-neutral-400">{expanded ? '▼' : '▶'}</span>
       </button>
 
       {expanded && (
-        <div className="mt-4 space-y-3">
-          <p className="text-sm text-neutral-400 mb-4">
-            Select a strategy to learn about it. Use the Options Lookup above to build positions.
-          </p>
+        <div className="mt-4">
+          {loading && (
+            <div className="text-center py-4 text-neutral-400">Loading...</div>
+          )}
 
-          {strategies.map((strategy, idx) => (
-            <div
-              key={idx}
-              className={`p-3 rounded-lg border ${getTypeColor(strategy.type)} cursor-pointer hover:opacity-80 transition-opacity`}
-              onClick={() => onBuildStrategy && onBuildStrategy(strategy)}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-xl">{strategy.icon}</span>
-                  <div>
-                    <div className="font-medium">{strategy.name}</div>
-                    <div className="text-xs opacity-70">{strategy.legs} leg{strategy.legs > 1 ? 's' : ''} • {strategy.type}</div>
-                  </div>
-                </div>
-              </div>
-              <p className="text-xs mt-2 opacity-80">{strategy.description}</p>
-              <div className="flex gap-4 mt-2 text-xs">
-                <span>Max Profit: <span className="text-green-400">{strategy.maxProfit}</span></span>
-                <span>Max Loss: <span className="text-red-400">{strategy.maxLoss}</span></span>
+          {error && (
+            <div className="text-red-400 text-sm mb-4 p-2 bg-red-900/20 rounded">{error}</div>
+          )}
+
+          {/* Step 0: Select Strategy */}
+          {step === 0 && !loading && (
+            <div className="space-y-3">
+              <p className="text-sm text-neutral-400 mb-4">
+                Select a strategy to build with real market prices:
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(STRATEGY_TEMPLATES).map(([key, strategy]) => (
+                  <button
+                    key={key}
+                    onClick={() => handleSelectStrategy(key, strategy)}
+                    className={`p-3 rounded-lg border text-left transition-all hover:opacity-80 ${getTypeColor(strategy.type)}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{strategyIcons[key] || '📊'}</span>
+                      <div>
+                        <div className="font-medium text-sm">{strategy.name}</div>
+                        <div className="text-xs opacity-70">{strategy.legs} leg{strategy.legs > 1 ? 's' : ''}</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
-          ))}
+          )}
+
+          {/* Step 1: Configure */}
+          {step === 1 && !loading && selectedStrategy && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-white flex items-center gap-2">
+                  <span>{strategyIcons[selectedStrategy.key]}</span>
+                  {selectedStrategy.name}
+                </h3>
+                <button onClick={resetBuilder} className="text-sm text-neutral-400 hover:text-white">
+                  ← Back
+                </button>
+              </div>
+
+              <p className="text-sm text-neutral-400">{selectedStrategy.description}</p>
+
+              {/* Ticker Input */}
+              <div>
+                <label className="block text-sm text-neutral-400 mb-1">Stock Ticker</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={ticker}
+                    onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => e.key === 'Enter' && handleFetchOptions()}
+                    placeholder="e.g., AAPL, SPY"
+                    className="flex-1 bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white"
+                  />
+                  <button
+                    onClick={handleFetchOptions}
+                    disabled={!ticker}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-neutral-700 rounded-lg"
+                  >
+                    Load
+                  </button>
+                </div>
+              </div>
+
+              {optionsData && (
+                <>
+                  <div className="p-3 bg-neutral-900 rounded-lg">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-neutral-400">{optionsData.underlyingSymbol}</span>
+                      <span className="text-green-400 font-medium">${optionsData.underlyingPrice?.toFixed(2)}</span>
+                    </div>
+                  </div>
+
+                  {/* Expiry Selection */}
+                  <div>
+                    <label className="block text-sm text-neutral-400 mb-1">Expiration</label>
+                    <select
+                      value={selectedExpiry}
+                      onChange={(e) => setSelectedExpiry(parseInt(e.target.value))}
+                      className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white"
+                    >
+                      {optionsData.expirationDates.map((exp) => (
+                        <option key={exp} value={exp}>{unixToDate(exp)}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Strike Configuration */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm text-neutral-400 mb-1">Center Strike</label>
+                      <input
+                        type="number"
+                        value={baseStrike}
+                        onChange={(e) => setBaseStrike(parseFloat(e.target.value) || 0)}
+                        className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white"
+                        step="1"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-neutral-400 mb-1">Strike Width</label>
+                      <select
+                        value={strikeWidth}
+                        onChange={(e) => setStrikeWidth(parseInt(e.target.value))}
+                        className="w-full bg-neutral-900 border border-neutral-700 rounded-lg px-3 py-2 text-white"
+                      >
+                        <option value={1}>$1</option>
+                        <option value={2.5}>$2.50</option>
+                        <option value={5}>$5</option>
+                        <option value={10}>$10</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleBuildStrategy}
+                    className="w-full py-2 bg-green-600 hover:bg-green-700 rounded-lg font-medium"
+                  >
+                    Build Strategy
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Step 2: Preview */}
+          {step === 2 && !loading && builtLegs.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium text-white flex items-center gap-2">
+                  <span>{strategyIcons[selectedStrategy.key]}</span>
+                  {selectedStrategy.name} Preview
+                </h3>
+                <button onClick={() => setStep(1)} className="text-sm text-neutral-400 hover:text-white">
+                  ← Modify
+                </button>
+              </div>
+
+              {/* Legs Display */}
+              <div className="space-y-2">
+                {builtLegs.map((leg, idx) => (
+                  <div key={idx} className={`p-3 rounded-lg border ${leg.action === 'buy' ? 'border-green-700 bg-green-900/20' : 'border-red-700 bg-red-900/20'}`}>
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className={`font-medium ${leg.action === 'buy' ? 'text-green-400' : 'text-red-400'}`}>
+                          {leg.action.toUpperCase()}
+                        </span>
+                        <span className="text-white ml-2">{leg.qty}x ${leg.strike} {leg.optionType.toUpperCase()}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-neutral-300">${leg.premium.toFixed(2)}</span>
+                        <span className="text-neutral-500 text-xs ml-2">({(leg.iv * 100).toFixed(0)}% IV)</span>
+                      </div>
+                    </div>
+                    <div className="text-xs text-neutral-500 mt-1">Exp: {leg.expiration}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Metrics */}
+              {metrics && (
+                <div className="p-4 bg-neutral-900 rounded-lg border border-neutral-700">
+                  <h4 className="text-sm font-medium text-neutral-400 mb-3">Strategy Metrics</h4>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <div className="text-neutral-500">Max Profit</div>
+                      <div className="text-green-400 font-medium">
+                        {metrics.maxProfit === Infinity ? 'Unlimited' : `$${metrics.maxProfit.toFixed(0)}`}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-neutral-500">Max Loss</div>
+                      <div className="text-red-400 font-medium">
+                        {metrics.maxLoss === -Infinity ? 'Unlimited' : `$${Math.abs(metrics.maxLoss).toFixed(0)}`}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-neutral-500">Net {metrics.isCredit ? 'Credit' : 'Debit'}</div>
+                      <div className={`font-medium ${metrics.isCredit ? 'text-green-400' : 'text-red-400'}`}>
+                        ${Math.abs(metrics.netPremium).toFixed(0)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-neutral-500">Breakeven{metrics.breakevens.length > 1 ? 's' : ''}</div>
+                      <div className="text-yellow-400 font-medium">
+                        {metrics.breakevens.length > 0 ? metrics.breakevens.map(b => `$${b}`).join(', ') : 'N/A'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={resetBuilder}
+                  className="flex-1 py-2 bg-neutral-700 hover:bg-neutral-600 rounded-lg font-medium"
+                >
+                  Start Over
+                </button>
+                <button
+                  onClick={handleLoadToCalculator}
+                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium"
+                >
+                  Load to Calculator
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1536,6 +1759,236 @@ function PayoffChart({ data, breakEven, optionType, portfolio, stockPrice }) {
         <p className="text-xs text-neutral-500 mt-2">
           Combined P&L across all {portfolio.length} positions at expiration (assumes all expire on the same date for simplicity)
         </p>
+      )}
+    </div>
+  );
+}
+
+// Multi-Date Risk Graph Component
+function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePrice, premium }) {
+  const [showGraph, setShowGraph] = useState(true);
+  const [selectedDates, setSelectedDates] = useState([0, Math.floor(daysToExpiry / 2), daysToExpiry]);
+  const [ivAdjustment, setIvAdjustment] = useState(0); // -50 to +50 percent
+
+  const hasPortfolio = portfolio && portfolio.length > 0;
+  if (!stockPrice || daysToExpiry <= 0) return null;
+
+  // Generate date options
+  const dateOptions = [];
+  for (let d = 0; d <= daysToExpiry; d += Math.max(1, Math.floor(daysToExpiry / 10))) {
+    dateOptions.push(d);
+  }
+  if (!dateOptions.includes(daysToExpiry)) {
+    dateOptions.push(daysToExpiry);
+  }
+
+  // Calculate P&L for a given price and days from now
+  const calculatePnLAtDate = (price, daysFromNow) => {
+    const r = 0.05;
+
+    if (hasPortfolio) {
+      let totalPnL = 0;
+      for (const pos of portfolio) {
+        const qty = pos.qty || 1;
+        const posExpDays = daysBetween(new Date(), new Date(pos.expirationDate));
+        const daysRemaining = posExpDays - daysFromNow;
+        const baseIV = (pos.iv || 30) / 100;
+        const adjustedIV = baseIV * (1 + ivAdjustment / 100);
+
+        let optionValue;
+        if (daysRemaining <= 0) {
+          optionValue = pos.optionType === 'call'
+            ? Math.max(0, price - pos.strikePrice)
+            : Math.max(0, pos.strikePrice - price);
+        } else {
+          const T = daysRemaining / 365;
+          optionValue = calculateOptionPrice(price, pos.strikePrice, T, r, adjustedIV, pos.optionType);
+        }
+
+        // Account for buy/sell direction
+        const direction = pos.action === 'sell' ? -1 : 1;
+        totalPnL += direction * (optionValue - pos.premium) * 100 * qty;
+      }
+      return totalPnL;
+    } else {
+      // Single option
+      const daysRemaining = daysToExpiry - daysFromNow;
+      const baseIV = 0.30;
+      const adjustedIV = baseIV * (1 + ivAdjustment / 100);
+
+      let optionValue;
+      if (daysRemaining <= 0) {
+        optionValue = optionType === 'call'
+          ? Math.max(0, price - strikePrice)
+          : Math.max(0, strikePrice - price);
+      } else {
+        const T = daysRemaining / 365;
+        optionValue = calculateOptionPrice(price, strikePrice, T, r, adjustedIV, optionType);
+      }
+      return (optionValue - premium) * 100;
+    }
+  };
+
+  // Generate chart data with multiple date lines
+  const generateMultiDateData = () => {
+    const priceRange = 0.25;
+    const centerPrice = hasPortfolio
+      ? portfolio.reduce((sum, p) => sum + p.strikePrice, 0) / portfolio.length
+      : strikePrice;
+    const minPrice = Math.max(1, stockPrice * (1 - priceRange));
+    const maxPrice = stockPrice * (1 + priceRange);
+    const step = (maxPrice - minPrice) / 50;
+
+    const chartData = [];
+    for (let price = minPrice; price <= maxPrice; price += step) {
+      const row = { stockPrice: parseFloat(price.toFixed(2)) };
+      for (const day of selectedDates) {
+        row[`day${day}`] = parseFloat(calculatePnLAtDate(price, day).toFixed(2));
+      }
+      chartData.push(row);
+    }
+    return chartData;
+  };
+
+  const chartData = generateMultiDateData();
+
+  const colors = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'];
+
+  const toggleDate = (day) => {
+    if (selectedDates.includes(day)) {
+      if (selectedDates.length > 1) {
+        setSelectedDates(selectedDates.filter(d => d !== day));
+      }
+    } else if (selectedDates.length < 5) {
+      setSelectedDates([...selectedDates, day].sort((a, b) => a - b));
+    }
+  };
+
+  const getDateLabel = (day) => {
+    if (day === 0) return 'Today';
+    if (day === daysToExpiry) return 'Expiry';
+    return `+${day}d`;
+  };
+
+  return (
+    <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-semibold text-white">Risk Graph (Multi-Date)</h2>
+        <button
+          onClick={() => setShowGraph(!showGraph)}
+          className="text-sm text-neutral-400 hover:text-white"
+        >
+          {showGraph ? 'Hide' : 'Show'}
+        </button>
+      </div>
+
+      {showGraph && (
+        <>
+          {/* Date Selection */}
+          <div className="mb-4">
+            <div className="text-xs text-neutral-400 mb-2">Select dates to display (up to 5):</div>
+            <div className="flex flex-wrap gap-2">
+              {dateOptions.map((day) => (
+                <button
+                  key={day}
+                  onClick={() => toggleDate(day)}
+                  className={`px-3 py-1 text-xs rounded-lg transition-all ${
+                    selectedDates.includes(day)
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
+                  }`}
+                >
+                  {getDateLabel(day)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* IV Adjustment Slider */}
+          <div className="mb-4 flex items-center gap-4">
+            <span className="text-xs text-neutral-400">IV Adjustment:</span>
+            <input
+              type="range"
+              min="-50"
+              max="50"
+              value={ivAdjustment}
+              onChange={(e) => setIvAdjustment(parseInt(e.target.value))}
+              className="flex-1 h-2 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+            />
+            <span className={`text-sm font-medium ${ivAdjustment >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              {ivAdjustment >= 0 ? '+' : ''}{ivAdjustment}%
+            </span>
+          </div>
+
+          {/* Chart */}
+          <ResponsiveContainer width="100%" height={350}>
+            <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis
+                dataKey="stockPrice"
+                stroke="#9CA3AF"
+                tickFormatter={(v) => `$${v}`}
+              />
+              <YAxis
+                stroke="#9CA3AF"
+                tickFormatter={(v) => `$${v}`}
+              />
+              <RechartsTooltip
+                contentStyle={{
+                  backgroundColor: '#1F2937',
+                  border: '1px solid #374151',
+                  borderRadius: '8px',
+                }}
+                labelStyle={{ color: '#9CA3AF' }}
+                formatter={(value, name) => [
+                  `$${value.toFixed(2)}`,
+                  getDateLabel(parseInt(name.replace('day', '')))
+                ]}
+                labelFormatter={(label) => `Stock: $${label}`}
+              />
+              <ReferenceLine y={0} stroke="#6B7280" strokeDasharray="5 5" />
+              <ReferenceLine
+                x={stockPrice}
+                stroke="#9CA3AF"
+                strokeDasharray="3 3"
+                label={{ value: 'Current', fill: '#9CA3AF', position: 'top' }}
+              />
+              {selectedDates.map((day, idx) => (
+                <Line
+                  key={day}
+                  type="monotone"
+                  dataKey={`day${day}`}
+                  stroke={colors[idx % colors.length]}
+                  strokeWidth={day === daysToExpiry ? 3 : 2}
+                  strokeDasharray={day === 0 ? '5 5' : undefined}
+                  dot={false}
+                  name={`day${day}`}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+
+          {/* Legend */}
+          <div className="flex flex-wrap justify-center gap-4 mt-3">
+            {selectedDates.map((day, idx) => (
+              <div key={day} className="flex items-center gap-2 text-sm">
+                <div
+                  className="w-4 h-0.5"
+                  style={{
+                    backgroundColor: colors[idx % colors.length],
+                    borderStyle: day === 0 ? 'dashed' : 'solid'
+                  }}
+                />
+                <span className="text-neutral-400">{getDateLabel(day)}</span>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-xs text-neutral-500 mt-3 text-center">
+            Shows projected P&L at different dates. Dashed line = Today. Thicker line = Expiration.
+            {ivAdjustment !== 0 && ` IV adjusted by ${ivAdjustment}%.`}
+          </p>
+        </>
       )}
     </div>
   );
@@ -2307,6 +2760,103 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry, portfolio }) {
 
 // Saved Positions Component
 function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList }) {
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [livePrices, setLivePrices] = useState({}); // ticker -> { price, lastUpdated }
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Get unique tickers from positions
+  const tickers = [...new Set(positions
+    .filter(p => p.ticker || (p.type === 'portfolio' && p.positions?.length > 0))
+    .map(p => p.ticker || p.positions?.[0]?.ticker)
+    .filter(Boolean)
+  )];
+
+  // Fetch live prices
+  const fetchLivePrices = useCallback(async () => {
+    if (tickers.length === 0) return;
+    setRefreshing(true);
+
+    const newPrices = { ...livePrices };
+    for (const ticker of tickers) {
+      try {
+        const quote = await fetchStockQuote(ticker);
+        newPrices[ticker] = {
+          price: quote.price,
+          lastUpdated: new Date(),
+          change: quote.change,
+          changePercent: quote.changePercent
+        };
+      } catch (err) {
+        console.error(`Failed to fetch price for ${ticker}:`, err);
+      }
+    }
+    setLivePrices(newPrices);
+    setRefreshing(false);
+  }, [tickers.join(',')]);
+
+  // Auto-refresh effect
+  useEffect(() => {
+    if (!autoRefresh || tickers.length === 0) return;
+
+    fetchLivePrices();
+    const interval = setInterval(fetchLivePrices, 60000); // Refresh every 60 seconds
+    return () => clearInterval(interval);
+  }, [autoRefresh, fetchLivePrices]);
+
+  // Calculate live P&L for a position/portfolio
+  const calculateLivePnL = (item) => {
+    const ticker = item.ticker || item.positions?.[0]?.ticker;
+    const liveData = livePrices[ticker];
+    if (!liveData) return null;
+
+    const currentPrice = liveData.price;
+
+    if (item.type === 'portfolio') {
+      let totalPnL = 0;
+      let totalCost = 0;
+
+      for (const pos of item.positions) {
+        const qty = pos.qty || 1;
+        const daysToExp = daysBetween(new Date(), new Date(pos.expirationDate));
+        const T = Math.max(0, daysToExp / 365);
+        const iv = (pos.iv || 30) / 100;
+
+        let optionValue;
+        if (T <= 0) {
+          optionValue = pos.optionType === 'call'
+            ? Math.max(0, currentPrice - pos.strikePrice)
+            : Math.max(0, pos.strikePrice - currentPrice);
+        } else {
+          optionValue = calculateOptionPrice(currentPrice, pos.strikePrice, T, 0.05, iv, pos.optionType);
+        }
+
+        const direction = pos.action === 'sell' ? -1 : 1;
+        totalPnL += direction * (optionValue - pos.premium) * 100 * qty;
+        totalCost += Math.abs(pos.premium) * 100 * qty;
+      }
+
+      return { pnl: totalPnL, cost: totalCost, pnlPercent: (totalPnL / totalCost) * 100 };
+    } else {
+      // Single position
+      const daysToExp = daysBetween(new Date(), new Date(item.expirationDate));
+      const T = Math.max(0, daysToExp / 365);
+      const iv = (item.iv || 30) / 100;
+
+      let optionValue;
+      if (T <= 0) {
+        optionValue = item.optionType === 'call'
+          ? Math.max(0, currentPrice - item.strikePrice)
+          : Math.max(0, item.strikePrice - currentPrice);
+      } else {
+        optionValue = calculateOptionPrice(currentPrice, item.strikePrice, T, 0.05, iv, item.optionType);
+      }
+
+      const cost = item.premium * 100;
+      const pnl = (optionValue - item.premium) * 100;
+      return { pnl, cost, pnlPercent: (pnl / cost) * 100 };
+    }
+  };
+
   if (positions.length === 0) {
     return (
       <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
@@ -2320,26 +2870,67 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList })
 
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
-      <h2 className="text-xl font-semibold mb-4 text-white">Saved Positions & Portfolios</h2>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-semibold text-white">Saved Positions & Portfolios</h2>
+        <div className="flex items-center gap-2">
+          {refreshing && <span className="text-xs text-neutral-500">Updating...</span>}
+          <button
+            onClick={fetchLivePrices}
+            disabled={tickers.length === 0}
+            className="px-2 py-1 text-xs bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 rounded text-neutral-300 transition-colors"
+            title="Refresh prices"
+          >
+            ↻
+          </button>
+          <label className="flex items-center gap-1 text-xs text-neutral-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="accent-blue-500"
+            />
+            Auto
+          </label>
+        </div>
+      </div>
+
       <div className="space-y-2 max-h-64 overflow-y-auto">
         {positions.map((item, idx) => {
           const isPortfolio = item.type === 'portfolio';
+          const livePnL = calculateLivePnL(item);
+          const ticker = item.ticker || item.positions?.[0]?.ticker;
+          const liveData = livePrices[ticker];
 
           if (isPortfolio) {
-            // Render portfolio
+            // Render portfolio with live P&L
             return (
               <div key={idx} className="bg-black/70 rounded-lg p-3 border border-purple-500/30">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">PORTFOLIO</span>
+                      {ticker && <span className="text-xs text-neutral-500">{ticker}</span>}
                       <span className="text-white font-medium">{item.positionCount} positions</span>
                     </div>
                     <div className="text-sm text-neutral-400 mt-1">
                       <span>Cost: ${item.totalCost?.toFixed(0)}</span>
-                      <span className="mx-2">•</span>
-                      <span>{item.expiries?.length || 1} expir{item.expiries?.length === 1 ? 'y' : 'ies'}</span>
+                      {livePnL && (
+                        <>
+                          <span className="mx-2">•</span>
+                          <span className={livePnL.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
+                            {livePnL.pnl >= 0 ? '+' : ''}${livePnL.pnl.toFixed(0)} ({livePnL.pnlPercent >= 0 ? '+' : ''}{livePnL.pnlPercent.toFixed(0)}%)
+                          </span>
+                        </>
+                      )}
                     </div>
+                    {liveData && (
+                      <div className="text-xs text-neutral-500 mt-1">
+                        {ticker}: ${liveData.price.toFixed(2)}
+                        <span className={liveData.change >= 0 ? 'text-green-400 ml-1' : 'text-red-400 ml-1'}>
+                          ({liveData.change >= 0 ? '+' : ''}{liveData.changePercent?.toFixed(2)}%)
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div className="flex gap-1">
                     <button
@@ -2360,44 +2951,60 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList })
             );
           }
 
-          // Render single position
+          // Render single position with live P&L
           return (
-            <div key={idx} className={`flex items-center justify-between bg-black/70 rounded-lg p-3 ${isInCompare(idx) ? 'ring-1 ring-purple-500' : ''}`}>
-              <div>
-                <span className={`font-medium ${item.optionType === 'call' ? 'text-green-400' : 'text-red-400'}`}>
-                  {item.optionType?.toUpperCase()}
-                </span>
-                <span className="text-neutral-300 ml-2">
-                  ${item.strikePrice} @ ${item.premium}
-                </span>
-                <span className="text-neutral-500 text-sm ml-2">
-                  {item.expirationDate}
-                </span>
-              </div>
-              <div className="flex gap-1">
-                <button
-                  onClick={() => onCompare(idx)}
-                  className={`px-2 py-1 text-xs rounded transition-colors ${
-                    isInCompare(idx)
-                      ? 'bg-purple-600 text-white'
-                      : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
-                  }`}
-                  title={isInCompare(idx) ? 'Remove from compare' : 'Add to compare'}
-                >
-                  {isInCompare(idx) ? '✓' : '+'}
-                </button>
-                <button
-                  onClick={() => onLoad(item)}
-                  className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white transition-colors"
-                >
-                  Load
-                </button>
-                <button
-                  onClick={() => onDelete(idx)}
-                  className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded text-white transition-colors"
-                >
-                  ×
-                </button>
+            <div key={idx} className={`bg-black/70 rounded-lg p-3 ${isInCompare(idx) ? 'ring-1 ring-purple-500' : ''}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className={`font-medium ${item.optionType === 'call' ? 'text-green-400' : 'text-red-400'}`}>
+                      {item.optionType?.toUpperCase()}
+                    </span>
+                    <span className="text-neutral-300">
+                      ${item.strikePrice} @ ${item.premium}
+                    </span>
+                    <span className="text-neutral-500 text-sm">
+                      {item.expirationDate}
+                    </span>
+                  </div>
+                  {livePnL && (
+                    <div className="text-sm mt-1">
+                      <span className={livePnL.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
+                        {livePnL.pnl >= 0 ? '+' : ''}${livePnL.pnl.toFixed(2)} ({livePnL.pnlPercent >= 0 ? '+' : ''}{livePnL.pnlPercent.toFixed(0)}%)
+                      </span>
+                      {liveData && (
+                        <span className="text-neutral-500 ml-2 text-xs">
+                          Stock: ${liveData.price.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => onCompare(idx)}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      isInCompare(idx)
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
+                    }`}
+                    title={isInCompare(idx) ? 'Remove from compare' : 'Add to compare'}
+                  >
+                    {isInCompare(idx) ? '✓' : '+'}
+                  </button>
+                  <button
+                    onClick={() => onLoad(item)}
+                    className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white transition-colors"
+                  >
+                    Load
+                  </button>
+                  <button
+                    onClick={() => onDelete(idx)}
+                    className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded text-white transition-colors"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
             </div>
           );
@@ -2406,6 +3013,58 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList })
       {compareList.length > 0 && (
         <p className="text-xs text-purple-400 mt-2">{compareList.length} position(s) selected for comparison</p>
       )}
+      {autoRefresh && (
+        <p className="text-xs text-neutral-500 mt-2">Auto-refreshing every 60 seconds</p>
+      )}
+
+      {/* Export/Import Controls */}
+      <div className="flex gap-2 mt-4 pt-4 border-t border-neutral-800">
+        <button
+          onClick={() => {
+            const dataStr = JSON.stringify(positions, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `options-portfolio-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          className="flex-1 px-3 py-2 text-xs bg-neutral-800 hover:bg-neutral-700 rounded text-neutral-300 transition-colors"
+        >
+          Export All
+        </button>
+        <label className="flex-1">
+          <input
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (event) => {
+                try {
+                  const imported = JSON.parse(event.target?.result);
+                  if (Array.isArray(imported)) {
+                    // Merge with existing - add to localStorage
+                    const existing = JSON.parse(localStorage.getItem('optionsPositions') || '[]');
+                    const merged = [...existing, ...imported];
+                    localStorage.setItem('optionsPositions', JSON.stringify(merged));
+                    window.location.reload(); // Refresh to load new data
+                  }
+                } catch (err) {
+                  alert('Invalid file format');
+                }
+              };
+              reader.readAsText(file);
+            }}
+          />
+          <span className="block w-full px-3 py-2 text-xs text-center bg-neutral-800 hover:bg-neutral-700 rounded text-neutral-300 cursor-pointer transition-colors">
+            Import
+          </span>
+        </label>
+      </div>
     </div>
   );
 }
@@ -2767,6 +3426,10 @@ function App() {
               onLoadPortfolio={handleLoadPortfolioFromLookup}
               onSavePortfolio={handleSavePortfolioFromLookup}
             />
+            <StrategyBuilder
+              onLoadStrategy={handleLoadPortfolioFromLookup}
+              onStockPriceUpdate={handleStockPriceUpdate}
+            />
             <OptionsForm values={values} onChange={setValues} />
             <GreeksDashboard greeks={greeks} />
             <SavedPositions
@@ -2793,6 +3456,14 @@ function App() {
               optionType={values.optionType}
               portfolio={portfolio}
               stockPrice={values.stockPrice}
+            />
+            <RiskGraph
+              portfolio={portfolio}
+              stockPrice={values.stockPrice}
+              daysToExpiry={daysToExpiry}
+              optionType={values.optionType}
+              strikePrice={values.strikePrice}
+              premium={values.premium}
             />
             <PnLHeatmap
               heatmapData={heatmapData}

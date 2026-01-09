@@ -197,3 +197,363 @@ export function daysBetween(date1, date2) {
   const oneDay = 24 * 60 * 60 * 1000;
   return Math.round(Math.abs((date2 - date1) / oneDay));
 }
+
+// ============================================================
+// MULTI-LEG STRATEGY CALCULATIONS
+// ============================================================
+
+// Strategy leg definition
+// { optionType: 'call'|'put', action: 'buy'|'sell', strike, premium, qty, expiration, iv }
+
+// Calculate combined P&L for a multi-leg strategy at a given stock price
+export function calculateStrategyPnL(legs, stockPrice, atExpiration = true, daysFromNow = 0, r = 0.05) {
+  let totalPnL = 0;
+
+  for (const leg of legs) {
+    const { optionType, action, strike, premium, qty = 1, expiration, iv = 0.3 } = leg;
+    const multiplier = action === 'buy' ? 1 : -1;
+
+    let optionValue;
+    if (atExpiration) {
+      // At expiration, use intrinsic value
+      if (optionType === 'call') {
+        optionValue = Math.max(0, stockPrice - strike);
+      } else {
+        optionValue = Math.max(0, strike - stockPrice);
+      }
+    } else {
+      // Before expiration, use Black-Scholes
+      const daysToExpiry = daysBetween(new Date(), new Date(expiration)) - daysFromNow;
+      const T = Math.max(0, daysToExpiry / 365);
+      if (T <= 0) {
+        optionValue = optionType === 'call'
+          ? Math.max(0, stockPrice - strike)
+          : Math.max(0, strike - stockPrice);
+      } else {
+        optionValue = calculateOptionPrice(stockPrice, strike, T, r, iv, optionType);
+      }
+    }
+
+    // For sold options, we received premium; for bought, we paid premium
+    const legPnL = multiplier * (optionValue - premium) * 100 * qty;
+    totalPnL += legPnL;
+  }
+
+  return totalPnL;
+}
+
+// Calculate combined Greeks for a multi-leg strategy
+export function calculateStrategyGreeks(legs, stockPrice, r = 0.05) {
+  const combined = { delta: 0, gamma: 0, theta: 0, vega: 0, rho: 0 };
+
+  for (const leg of legs) {
+    const { optionType, action, strike, expiration, iv = 0.3, qty = 1 } = leg;
+    const daysToExpiry = daysBetween(new Date(), new Date(expiration));
+    const T = Math.max(0.001, daysToExpiry / 365);
+    const multiplier = action === 'buy' ? 1 : -1;
+
+    const greeks = calculateGreeks(stockPrice, strike, T, r, iv, optionType);
+
+    combined.delta += greeks.delta * multiplier * qty;
+    combined.gamma += greeks.gamma * multiplier * qty;
+    combined.theta += greeks.theta * multiplier * qty;
+    combined.vega += greeks.vega * multiplier * qty;
+    combined.rho += greeks.rho * multiplier * qty;
+  }
+
+  return combined;
+}
+
+// Generate strategy P&L curve for charting
+export function generateStrategyPayoffData(legs, currentPrice, range = 0.3) {
+  const minPrice = Math.max(0, currentPrice * (1 - range));
+  const maxPrice = currentPrice * (1 + range);
+  const step = (maxPrice - minPrice) / 100;
+
+  const data = [];
+  for (let price = minPrice; price <= maxPrice; price += step) {
+    const pnl = calculateStrategyPnL(legs, price, true);
+    data.push({
+      stockPrice: parseFloat(price.toFixed(2)),
+      pnl: parseFloat(pnl.toFixed(2)),
+    });
+  }
+
+  return data;
+}
+
+// Generate multi-date P&L curves for risk graph
+export function generateMultiDatePayoffData(legs, currentPrice, daysToExpiry, range = 0.3, dateCount = 5) {
+  const minPrice = Math.max(0, currentPrice * (1 - range));
+  const maxPrice = currentPrice * (1 + range);
+  const step = (maxPrice - minPrice) / 50;
+
+  // Generate date intervals
+  const dateIntervals = [0];
+  const dayStep = Math.max(1, Math.floor(daysToExpiry / (dateCount - 1)));
+  for (let d = dayStep; d < daysToExpiry; d += dayStep) {
+    dateIntervals.push(d);
+  }
+  dateIntervals.push(daysToExpiry);
+
+  const data = [];
+  for (let price = minPrice; price <= maxPrice; price += step) {
+    const row = { stockPrice: parseFloat(price.toFixed(2)) };
+
+    for (const day of dateIntervals) {
+      const atExpiration = day >= daysToExpiry;
+      const pnl = calculateStrategyPnL(legs, price, atExpiration, day);
+      row[`day${day}`] = parseFloat(pnl.toFixed(2));
+    }
+
+    data.push(row);
+  }
+
+  return { data, dateIntervals };
+}
+
+// Calculate strategy metrics (max profit, max loss, breakevens)
+export function calculateStrategyMetrics(legs, currentPrice, range = 0.5) {
+  const minPrice = Math.max(0.01, currentPrice * (1 - range));
+  const maxPrice = currentPrice * (1 + range);
+  const step = 0.5;
+
+  let maxProfit = -Infinity;
+  let maxLoss = Infinity;
+  let maxProfitPrice = currentPrice;
+  let maxLossPrice = currentPrice;
+  const breakevens = [];
+  let prevPnL = null;
+
+  for (let price = minPrice; price <= maxPrice; price += step) {
+    const pnl = calculateStrategyPnL(legs, price, true);
+
+    if (pnl > maxProfit) {
+      maxProfit = pnl;
+      maxProfitPrice = price;
+    }
+    if (pnl < maxLoss) {
+      maxLoss = pnl;
+      maxLossPrice = price;
+    }
+
+    // Detect breakeven crossings
+    if (prevPnL !== null && ((prevPnL < 0 && pnl >= 0) || (prevPnL >= 0 && pnl < 0))) {
+      breakevens.push(parseFloat(price.toFixed(2)));
+    }
+    prevPnL = pnl;
+  }
+
+  // Check for unlimited profit/loss scenarios
+  const farOTMCall = calculateStrategyPnL(legs, currentPrice * 3, true);
+  const farOTMPut = calculateStrategyPnL(legs, currentPrice * 0.1, true);
+
+  const hasUnlimitedUpside = farOTMCall > maxProfit * 1.5;
+  const hasUnlimitedDownside = farOTMPut < maxLoss * 1.5;
+
+  // Calculate net debit/credit
+  const netPremium = legs.reduce((sum, leg) => {
+    const mult = leg.action === 'buy' ? -1 : 1;
+    return sum + mult * leg.premium * 100 * (leg.qty || 1);
+  }, 0);
+
+  return {
+    maxProfit: hasUnlimitedUpside ? Infinity : maxProfit,
+    maxLoss: hasUnlimitedDownside ? -Infinity : maxLoss,
+    maxProfitPrice,
+    maxLossPrice,
+    breakevens,
+    netPremium, // Negative = debit, Positive = credit
+    isDebit: netPremium < 0,
+    isCredit: netPremium > 0,
+  };
+}
+
+// Strategy templates with leg definitions
+export const STRATEGY_TEMPLATES = {
+  longCall: {
+    name: 'Long Call',
+    type: 'bullish',
+    legs: 1,
+    description: 'Buy a call option. Profit if stock rises above strike + premium.',
+    maxProfit: 'Unlimited',
+    maxLoss: 'Premium paid',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'call', action: 'buy', strikeOffset: 0 }
+    ]
+  },
+  longPut: {
+    name: 'Long Put',
+    type: 'bearish',
+    legs: 1,
+    description: 'Buy a put option. Profit if stock falls below strike - premium.',
+    maxProfit: 'Strike - Premium',
+    maxLoss: 'Premium paid',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'put', action: 'buy', strikeOffset: 0 }
+    ]
+  },
+  coveredCall: {
+    name: 'Covered Call',
+    type: 'neutral',
+    legs: 1,
+    description: 'Own stock, sell OTM call. Income strategy with capped upside.',
+    maxProfit: 'Premium + (Strike - Stock Price)',
+    maxLoss: 'Stock price - Premium',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'call', action: 'sell', strikeOffset: 5 }
+    ]
+  },
+  bullCallSpread: {
+    name: 'Bull Call Spread',
+    type: 'bullish',
+    legs: 2,
+    description: 'Buy lower strike call, sell higher strike call. Limited risk & reward.',
+    maxProfit: 'Strike difference - Net debit',
+    maxLoss: 'Net debit',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'call', action: 'buy', strikeOffset: 0 },
+      { optionType: 'call', action: 'sell', strikeOffset: 5 }
+    ]
+  },
+  bearPutSpread: {
+    name: 'Bear Put Spread',
+    type: 'bearish',
+    legs: 2,
+    description: 'Buy higher strike put, sell lower strike put. Limited risk & reward.',
+    maxProfit: 'Strike difference - Net debit',
+    maxLoss: 'Net debit',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'put', action: 'buy', strikeOffset: 0 },
+      { optionType: 'put', action: 'sell', strikeOffset: -5 }
+    ]
+  },
+  bullPutSpread: {
+    name: 'Bull Put Spread',
+    type: 'bullish',
+    legs: 2,
+    description: 'Sell higher strike put, buy lower strike put. Credit spread.',
+    maxProfit: 'Net credit received',
+    maxLoss: 'Strike difference - Credit',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'put', action: 'sell', strikeOffset: 0 },
+      { optionType: 'put', action: 'buy', strikeOffset: -5 }
+    ]
+  },
+  bearCallSpread: {
+    name: 'Bear Call Spread',
+    type: 'bearish',
+    legs: 2,
+    description: 'Sell lower strike call, buy higher strike call. Credit spread.',
+    maxProfit: 'Net credit received',
+    maxLoss: 'Strike difference - Credit',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'call', action: 'sell', strikeOffset: 0 },
+      { optionType: 'call', action: 'buy', strikeOffset: 5 }
+    ]
+  },
+  straddle: {
+    name: 'Long Straddle',
+    type: 'neutral',
+    legs: 2,
+    description: 'Buy call AND put at same strike. Profit from big moves either direction.',
+    maxProfit: 'Unlimited',
+    maxLoss: 'Total premium paid',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'call', action: 'buy', strikeOffset: 0 },
+      { optionType: 'put', action: 'buy', strikeOffset: 0 }
+    ]
+  },
+  strangle: {
+    name: 'Long Strangle',
+    type: 'neutral',
+    legs: 2,
+    description: 'Buy OTM call AND OTM put. Cheaper than straddle, needs bigger move.',
+    maxProfit: 'Unlimited',
+    maxLoss: 'Total premium paid',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'call', action: 'buy', strikeOffset: 5 },
+      { optionType: 'put', action: 'buy', strikeOffset: -5 }
+    ]
+  },
+  ironCondor: {
+    name: 'Iron Condor',
+    type: 'neutral',
+    legs: 4,
+    description: 'Sell OTM put spread + OTM call spread. Profit if stock stays in range.',
+    maxProfit: 'Net credit received',
+    maxLoss: 'Wing width - Credit',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'put', action: 'buy', strikeOffset: -10 },
+      { optionType: 'put', action: 'sell', strikeOffset: -5 },
+      { optionType: 'call', action: 'sell', strikeOffset: 5 },
+      { optionType: 'call', action: 'buy', strikeOffset: 10 }
+    ]
+  },
+  ironButterfly: {
+    name: 'Iron Butterfly',
+    type: 'neutral',
+    legs: 4,
+    description: 'Sell ATM straddle, buy OTM strangle for protection. Max profit at strike.',
+    maxProfit: 'Net credit received',
+    maxLoss: 'Wing width - Credit',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'put', action: 'buy', strikeOffset: -5 },
+      { optionType: 'put', action: 'sell', strikeOffset: 0 },
+      { optionType: 'call', action: 'sell', strikeOffset: 0 },
+      { optionType: 'call', action: 'buy', strikeOffset: 5 }
+    ]
+  },
+  callButterfly: {
+    name: 'Call Butterfly',
+    type: 'neutral',
+    legs: 3,
+    description: 'Buy 1 lower, sell 2 middle, buy 1 higher call. Max profit if stock at middle strike.',
+    maxProfit: 'Wing width - Net debit',
+    maxLoss: 'Net debit',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'call', action: 'buy', strikeOffset: -5 },
+      { optionType: 'call', action: 'sell', strikeOffset: 0, qty: 2 },
+      { optionType: 'call', action: 'buy', strikeOffset: 5 }
+    ]
+  },
+  putButterfly: {
+    name: 'Put Butterfly',
+    type: 'neutral',
+    legs: 3,
+    description: 'Buy 1 higher, sell 2 middle, buy 1 lower put. Max profit if stock at middle strike.',
+    maxProfit: 'Wing width - Net debit',
+    maxLoss: 'Net debit',
+    buildLegs: (baseStrike, expiry, baseIV) => [
+      { optionType: 'put', action: 'buy', strikeOffset: 5 },
+      { optionType: 'put', action: 'sell', strikeOffset: 0, qty: 2 },
+      { optionType: 'put', action: 'buy', strikeOffset: -5 }
+    ]
+  },
+  calendarSpread: {
+    name: 'Calendar Spread',
+    type: 'neutral',
+    legs: 2,
+    description: 'Sell near-term, buy far-term at same strike. Profits from time decay differential.',
+    maxProfit: 'Depends on IV and time',
+    maxLoss: 'Net debit',
+    requiresMultipleExpiries: true,
+    buildLegs: (baseStrike, nearExpiry, farExpiry, baseIV) => [
+      { optionType: 'call', action: 'sell', strikeOffset: 0, isNearTerm: true },
+      { optionType: 'call', action: 'buy', strikeOffset: 0, isFarTerm: true }
+    ]
+  },
+  diagonalSpread: {
+    name: 'Diagonal Spread',
+    type: 'bullish',
+    legs: 2,
+    description: 'Sell near-term OTM, buy far-term ATM/ITM. Like calendar with directional bias.',
+    maxProfit: 'Depends on IV and time',
+    maxLoss: 'Net debit',
+    requiresMultipleExpiries: true,
+    buildLegs: (baseStrike, nearExpiry, farExpiry, baseIV) => [
+      { optionType: 'call', action: 'sell', strikeOffset: 5, isNearTerm: true },
+      { optionType: 'call', action: 'buy', strikeOffset: 0, isFarTerm: true }
+    ]
+  },
+};
