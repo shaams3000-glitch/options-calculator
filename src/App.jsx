@@ -3560,6 +3560,7 @@ function App() {
 
   // Portfolio state for multi-position strategies
   const [portfolio, setPortfolio] = useState([]);
+  const [hasLoadedPosition, setHasLoadedPosition] = useState(false);
 
   // Calculate derived values
   const daysToExpiry = Math.max(0, daysBetween(new Date(), new Date(values.expirationDate)));
@@ -3685,6 +3686,7 @@ function App() {
         action: 'buy',
       }]);
     }
+    setHasLoadedPosition(true);
   }, [values.stockPrice]);
 
   const handleDeletePosition = useCallback((index) => {
@@ -3701,6 +3703,7 @@ function App() {
   // Handle loading portfolio from real options lookup
   const handleLoadPortfolioFromLookup = useCallback((selectedOptions, tickerSymbol) => {
     setPortfolio(selectedOptions);
+    setHasLoadedPosition(true);
     if (selectedOptions.length > 0) {
       const firstPos = selectedOptions[0];
       setValues({
@@ -3772,22 +3775,24 @@ function App() {
             <h1 className="text-2xl font-bold text-white">
               Options Profit Projection
             </h1>
-            <div className="flex gap-2">
-              {portfolio.length > 1 && (
+            {hasLoadedPosition && (
+              <div className="flex gap-2">
+                {portfolio.length > 1 && (
+                  <button
+                    onClick={handleSavePortfolio}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg font-medium transition-colors"
+                  >
+                    Save Portfolio ({portfolio.length})
+                  </button>
+                )}
                 <button
-                  onClick={handleSavePortfolio}
-                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg font-medium transition-colors"
+                  onClick={handleSavePosition}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors"
                 >
-                  Save Portfolio ({portfolio.length})
+                  Save Position
                 </button>
-              )}
-              <button
-                onClick={handleSavePosition}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors"
-              >
-                Save Position
-              </button>
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -3824,37 +3829,66 @@ function App() {
 
           {/* Right Column - Charts & Summary */}
           <div className="lg:col-span-2 space-y-6">
-            <SummaryPanel
-              values={values}
-              greeks={greeks}
-              breakEven={breakEven}
-              daysToExpiry={daysToExpiry}
-              portfolio={portfolio}
-            />
-            <RiskGraph
-              portfolio={portfolio}
-              stockPrice={values.stockPrice}
-              daysToExpiry={daysToExpiry}
-              optionType={values.optionType}
-              strikePrice={values.strikePrice}
-              premium={values.premium}
-              ticker={values.ticker}
-            />
-            <PnLHeatmap
-              heatmapData={heatmapData}
-              dateIntervals={dateIntervals}
-              premium={values.premium}
-              daysToExpiry={daysToExpiry}
-              portfolio={portfolio}
-              stockPrice={values.stockPrice}
-              optionType={values.optionType}
-              strikePrice={values.strikePrice}
-            />
-            <CompareChart
-              positions={compareList.map((idx) => savedPositions[idx]).filter(Boolean)}
-              currentPosition={values}
-              stockPrice={values.stockPrice}
-            />
+            {!hasLoadedPosition ? (
+              /* Welcome Message - shown when no position is loaded */
+              <div className="bg-black/50 rounded-xl p-8 border border-neutral-800 text-center">
+                <div className="text-6xl mb-6">📈</div>
+                <h2 className="text-2xl font-bold text-white mb-4">Welcome to Options Profit Projection</h2>
+                <p className="text-neutral-400 mb-6 max-w-md mx-auto">
+                  Get started by looking up real options data or building a strategy. Your P&L projections, risk graphs, and analysis will appear here.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg mx-auto">
+                  <div className="bg-neutral-900/50 rounded-lg p-4 border border-neutral-700">
+                    <div className="text-2xl mb-2">🔍</div>
+                    <h3 className="font-medium text-white mb-1">Lookup Real Options</h3>
+                    <p className="text-sm text-neutral-500">Search any stock ticker to see live options chains with real prices and IV</p>
+                  </div>
+                  <div className="bg-neutral-900/50 rounded-lg p-4 border border-neutral-700">
+                    <div className="text-2xl mb-2">🛠️</div>
+                    <h3 className="font-medium text-white mb-1">Strategy Builder</h3>
+                    <p className="text-sm text-neutral-500">Build multi-leg strategies like spreads, straddles, and iron condors</p>
+                  </div>
+                </div>
+                <div className="mt-6 text-sm text-neutral-500">
+                  Or load a saved position from the left sidebar
+                </div>
+              </div>
+            ) : (
+              /* Charts & Analysis - shown when position is loaded */
+              <>
+                <SummaryPanel
+                  values={values}
+                  greeks={greeks}
+                  breakEven={breakEven}
+                  daysToExpiry={daysToExpiry}
+                  portfolio={portfolio}
+                />
+                <RiskGraph
+                  portfolio={portfolio}
+                  stockPrice={values.stockPrice}
+                  daysToExpiry={daysToExpiry}
+                  optionType={values.optionType}
+                  strikePrice={values.strikePrice}
+                  premium={values.premium}
+                  ticker={values.ticker}
+                />
+                <PnLHeatmap
+                  heatmapData={heatmapData}
+                  dateIntervals={dateIntervals}
+                  premium={values.premium}
+                  daysToExpiry={daysToExpiry}
+                  portfolio={portfolio}
+                  stockPrice={values.stockPrice}
+                  optionType={values.optionType}
+                  strikePrice={values.strikePrice}
+                />
+                <CompareChart
+                  positions={compareList.map((idx) => savedPositions[idx]).filter(Boolean)}
+                  currentPosition={values}
+                  stockPrice={values.stockPrice}
+                />
+              </>
+            )}
           </div>
         </div>
       </main>
