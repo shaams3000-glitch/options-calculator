@@ -345,6 +345,8 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
     const optionType = formData.direction === 'bullish' ? 'call' : 'put';
 
     onSelectOption({
+      ticker: formData.ticker.toUpperCase(),
+      stockPrice: currentPrice,
       strikePrice: formatted.strike,
       premium: position.premium,
       iv: formatted.impliedVolatility,
@@ -355,6 +357,8 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
     // If portfolio has multiple positions, pass them all
     if (portfolioData.positions.length > 1) {
       const portfolioPositions = portfolioData.positions.map(pos => ({
+        ticker: formData.ticker.toUpperCase(),
+        stockPrice: currentPrice,
         strikePrice: pos.strike,
         premium: pos.premium,
         iv: formatOptionData(pos.option).impliedVolatility,
@@ -362,6 +366,7 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
         optionType: optionType,
         qty: pos.qty,
         costPer100: pos.costPer100,
+        action: 'buy',
       }));
       onSelectPortfolio(portfolioPositions);
     } else {
