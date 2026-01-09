@@ -3003,6 +3003,18 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry, portfolio }) {
         </div>
 
         <div className="flex justify-between items-center py-2 border-b border-neutral-800">
+          <span className="text-neutral-400">
+            <InfoTooltip content={tooltipContent.iv}>Implied Volatility</InfoTooltip>
+          </span>
+          <span className="text-purple-400 font-semibold">
+            {hasPortfolio
+              ? `${(portfolio.reduce((sum, p) => sum + (p.iv || 0), 0) / portfolio.length).toFixed(1)}%`
+              : `${values.iv?.toFixed(1) || 'N/A'}%`
+            }
+          </span>
+        </div>
+
+        <div className="flex justify-between items-center py-2 border-b border-neutral-800">
           <span className="text-neutral-400">Max Loss</span>
           <span className="text-red-400 font-semibold">
             {hasPortfolio ? `-$${portfolioTotalCost.toFixed(0)}` : `-$${maxLoss.toFixed(2)}`}
