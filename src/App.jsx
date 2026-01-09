@@ -1343,16 +1343,40 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
     ? Math.max(...portfolioExpiryDays.map(e => e.days))
     : daysToExpiry;
 
-  // Generate date intervals for date range view
+  // Check if a price is close to any strike price (within $1)
+  const isNearStrike = (price) => {
+    return allStrikes.some(strike => Math.abs(price - strike) < 1);
+  };
+
+  // Get the closest strike to a price
+  const getClosestStrike = (price) => {
+    return allStrikes.reduce((closest, strike) =>
+      Math.abs(price - strike) < Math.abs(price - closest) ? strike : closest
+    , allStrikes[0]);
+  };
+
+  // Check if a day matches an expiry date
+  const getExpiryIndexForDay = (day) => {
+    const idx = portfolioExpiryDays.findIndex(exp => exp.days === day);
+    return idx;
+  };
+
+  // Generate date intervals for date range view - include ALL expiry dates
   const generateDateRangeIntervals = () => {
-    const intervals = [0]; // Start with today
+    const intervalsSet = new Set([0]); // Start with today
+
+    // Add regular intervals
     for (let d = interval; d < maxDaysToExpiry; d += interval) {
-      intervals.push(d);
+      intervalsSet.add(d);
     }
-    if (intervals[intervals.length - 1] !== maxDaysToExpiry) {
-      intervals.push(maxDaysToExpiry); // Always include final expiry
+
+    // Always include ALL expiry dates
+    for (const exp of portfolioExpiryDays) {
+      intervalsSet.add(exp.days);
     }
-    return intervals;
+
+    // Convert to sorted array
+    return [...intervalsSet].sort((a, b) => a - b);
   };
 
   // Calculate P&L for positions expiring on a SPECIFIC date only (not cumulative)
@@ -1518,6 +1542,12 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
 
   // Portfolio mode
   const colorClasses = ['blue', 'purple', 'orange', 'green'];
+  const colorHex = {
+    blue: { text: '#60a5fa', bg: 'rgba(96, 165, 250, 0.1)', border: 'rgba(96, 165, 250, 0.5)' },
+    purple: { text: '#c084fc', bg: 'rgba(192, 132, 252, 0.1)', border: 'rgba(192, 132, 252, 0.5)' },
+    orange: { text: '#fb923c', bg: 'rgba(251, 146, 60, 0.1)', border: 'rgba(251, 146, 60, 0.5)' },
+    green: { text: '#4ade80', bg: 'rgba(74, 222, 128, 0.1)', border: 'rgba(74, 222, 128, 0.5)' },
+  };
   const dateRangeIntervals = generateDateRangeIntervals();
 
   return (
@@ -1703,10 +1733,15 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                   }));
                   const totalPnL = expiryPnLs.reduce((sum, e) => sum + e.pnl, 0);
                   const totalCost = portfolio.reduce((sum, p) => sum + (p.costPer100 || p.premium * 100) * (p.qty || 1), 0);
+                  const nearStrike = isNearStrike(price);
 
                   return (
-                    <tr key={idx}>
-                      <td className="p-2 text-neutral-300 font-medium">${price.toFixed(2)}</td>
+                    <tr key={idx} className={nearStrike ? 'border-y-2 border-yellow-500' : ''}>
+                      <td className={`p-2 font-medium ${nearStrike ? 'bg-yellow-500/20 text-yellow-300 font-bold' : 'text-neutral-300'}`}>
+                        {nearStrike && <span className="mr-1">▶</span>}
+                        ${price.toFixed(2)}
+                        {nearStrike && <span className="ml-1 text-xs text-yellow-400">(Strike)</span>}
+                      </td>
                       {expiryPnLs.map((expData, expIdx) => {
                         const percentValue = expData.cost > 0 ? (expData.pnl / expData.cost) * 100 : 0;
                         return (
@@ -1754,14 +1789,19 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                 <tr>
                   <th className="p-2 text-left text-neutral-400">Stock Price</th>
                   {dateRangeIntervals.map((day, idx) => {
-                    const isLastExpiry = day === maxDaysToExpiry;
+                    const expiryIdx = getExpiryIndexForDay(day);
+                    const isExpiry = expiryIdx >= 0;
+                    const expiryColorKey = isExpiry ? colorClasses[expiryIdx % colorClasses.length] : null;
+                    const colors = expiryColorKey ? colorHex[expiryColorKey] : null;
+
                     return (
                       <th
                         key={idx}
-                        className={`p-2 text-center ${isLastExpiry ? 'text-yellow-400 font-bold bg-yellow-400/10' : 'text-neutral-400'}`}
+                        className={`p-2 text-center ${isExpiry ? 'font-bold' : 'text-neutral-400'}`}
+                        style={isExpiry ? { color: colors.text, backgroundColor: colors.bg } : {}}
                       >
                         {day === 0 ? 'Today' : `+${day}d`}
-                        {isLastExpiry && <div className="text-xs opacity-70">Expiry</div>}
+                        {isExpiry && <div className="text-xs opacity-70">Exp {expiryIdx + 1}</div>}
                       </th>
                     );
                   })}
@@ -1769,18 +1809,30 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
               </thead>
               <tbody>
                 {customPricePoints.map((price, idx) => {
+                  const nearStrike = isNearStrike(price);
                   return (
-                    <tr key={idx}>
-                      <td className="p-2 text-neutral-300 font-medium">${price.toFixed(2)}</td>
+                    <tr key={idx} className={nearStrike ? 'border-y-2 border-yellow-500' : ''}>
+                      <td className={`p-2 font-medium ${nearStrike ? 'bg-yellow-500/20 text-yellow-300 font-bold' : 'text-neutral-300'}`}>
+                        {nearStrike && <span className="mr-1">▶</span>}
+                        ${price.toFixed(2)}
+                        {nearStrike && <span className="ml-1 text-xs text-yellow-400">(Strike)</span>}
+                      </td>
                       {dateRangeIntervals.map((day, dayIdx) => {
                         const pnl = calcPortfolioPnLAtDay(price, day);
                         const percentValue = totalPortfolioCost > 0 ? (pnl / totalPortfolioCost) * 100 : 0;
-                        const isLastExpiry = day === maxDaysToExpiry;
+                        const expiryIdx = getExpiryIndexForDay(day);
+                        const isExpiry = expiryIdx >= 0;
+                        const expiryColorKey = isExpiry ? colorClasses[expiryIdx % colorClasses.length] : null;
+                        const colors = expiryColorKey ? colorHex[expiryColorKey] : null;
+
                         return (
                           <td
                             key={dayIdx}
-                            className={`p-2 text-center font-medium ${isLastExpiry ? 'border-x border-yellow-400/30' : ''}`}
-                            style={{ backgroundColor: getColor(displayMode === 'percent' ? percentValue : pnl, displayMode === 'percent') }}
+                            className="p-2 text-center font-medium"
+                            style={{
+                              backgroundColor: getColor(displayMode === 'percent' ? percentValue : pnl, displayMode === 'percent'),
+                              ...(isExpiry ? { borderLeft: `2px solid ${colors.border}`, borderRight: `2px solid ${colors.border}` } : {})
+                            }}
                           >
                             <span className={pnl >= 0 ? 'text-green-200' : 'text-red-200'}>
                               {displayMode === 'percent'
@@ -1797,7 +1849,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
             </table>
           </div>
           <p className="text-xs text-neutral-500 mt-3">
-            Shows combined portfolio P&L at each date. Uses Black-Scholes for time value before expiry.
+            Shows combined portfolio P&L at each date. Uses Black-Scholes for time value before expiry. Colored columns = expiry dates.
           </p>
         </>
       )}
