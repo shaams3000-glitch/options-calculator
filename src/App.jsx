@@ -2759,10 +2759,12 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry, portfolio }) {
 }
 
 // Saved Positions Component
-function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList }) {
+function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList, onRename }) {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [livePrices, setLivePrices] = useState({}); // ticker -> { price, lastUpdated }
   const [refreshing, setRefreshing] = useState(false);
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [editName, setEditName] = useState('');
 
   // Get unique tickers from positions
   const tickers = [...new Set(positions
@@ -2903,15 +2905,67 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList })
 
           if (isPortfolio) {
             // Render portfolio with live P&L
+            const isEditing = editingIdx === idx;
+            const displayName = item.name || `${ticker || 'Unknown'} Portfolio`;
+
             return (
               <div key={idx} className="bg-black/70 rounded-lg p-3 border border-purple-500/30">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">PORTFOLIO</span>
-                      {ticker && <span className="text-xs text-neutral-500">{ticker}</span>}
-                      <span className="text-white font-medium">{item.positionCount} positions</span>
+                    {/* Ticker Badge */}
+                    <div className="flex items-center gap-2 mb-1">
+                      {ticker && (
+                        <span className="text-sm font-bold text-white bg-purple-600 px-2 py-0.5 rounded">
+                          {ticker}
+                        </span>
+                      )}
+                      <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">
+                        {item.positionCount} positions
+                      </span>
                     </div>
+
+                    {/* Name - editable */}
+                    {isEditing ? (
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              onRename(idx, editName);
+                              setEditingIdx(null);
+                            } else if (e.key === 'Escape') {
+                              setEditingIdx(null);
+                            }
+                          }}
+                          className="flex-1 bg-neutral-800 border border-neutral-600 rounded px-2 py-1 text-sm text-white"
+                          autoFocus
+                        />
+                        <button
+                          onClick={() => { onRename(idx, editName); setEditingIdx(null); }}
+                          className="text-xs text-green-400 hover:text-green-300"
+                        >
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingIdx(null)}
+                          className="text-xs text-neutral-400 hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        className="text-white font-medium cursor-pointer hover:text-purple-300 transition-colors"
+                        onClick={() => { setEditingIdx(idx); setEditName(displayName); }}
+                        title="Click to rename"
+                      >
+                        {displayName}
+                      </div>
+                    )}
+
+                    {/* Cost and P&L */}
                     <div className="text-sm text-neutral-400 mt-1">
                       <span>Cost: ${item.totalCost?.toFixed(0)}</span>
                       {livePnL && (
@@ -2923,6 +2977,8 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList })
                         </>
                       )}
                     </div>
+
+                    {/* Live stock price */}
                     {liveData && (
                       <div className="text-xs text-neutral-500 mt-1">
                         {ticker}: ${liveData.price.toFixed(2)}
@@ -2956,7 +3012,13 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList })
             <div key={idx} className={`bg-black/70 rounded-lg p-3 ${isInCompare(idx) ? 'ring-1 ring-purple-500' : ''}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Ticker badge */}
+                    {ticker && (
+                      <span className="text-sm font-bold text-white bg-blue-600 px-2 py-0.5 rounded">
+                        {ticker}
+                      </span>
+                    )}
                     <span className={`font-medium ${item.optionType === 'call' ? 'text-green-400' : 'text-red-400'}`}>
                       {item.optionType?.toUpperCase()}
                     </span>
@@ -3316,6 +3378,12 @@ function App() {
     setCompareList((prev) => prev.filter((i) => i !== index).map((i) => i > index ? i - 1 : i));
   }, []);
 
+  const handleRenamePosition = useCallback((index, newName) => {
+    setSavedPositions((prev) => prev.map((item, i) =>
+      i === index ? { ...item, name: newName } : item
+    ));
+  }, []);
+
   // Handle loading portfolio from real options lookup
   const handleLoadPortfolioFromLookup = useCallback((selectedOptions, tickerSymbol) => {
     setPortfolio(selectedOptions);
@@ -3438,6 +3506,7 @@ function App() {
               onDelete={handleDeletePosition}
               onCompare={handleToggleCompare}
               compareList={compareList}
+              onRename={handleRenamePosition}
             />
           </div>
 
