@@ -970,6 +970,7 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
                   <th className="p-2 text-center w-10">Select</th>
                   <th className="p-2 text-center w-16">Qty</th>
                   <th className="p-2 text-left">Strike</th>
+                  <th className="p-2 text-right">Last</th>
                   <th className="p-2 text-right">Bid</th>
                   <th className="p-2 text-right">Ask</th>
                   <th className="p-2 text-right">IV</th>
@@ -1014,13 +1015,22 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
                           ${formatted.strike}
                           {isITM && <span className="ml-1 text-xs text-blue-400">ITM</span>}
                         </td>
-                        <td className="p-2 text-right text-neutral-300">${formatted.bid.toFixed(2)}</td>
-                        <td className="p-2 text-right text-neutral-300">${formatted.ask.toFixed(2)}</td>
-                        <td className="p-2 text-right text-neutral-300">{formatted.impliedVolatility.toFixed(1)}%</td>
+                        <td className="p-2 text-right text-neutral-300">
+                          {formatted.lastPrice > 0 ? `$${formatted.lastPrice.toFixed(2)}` : <span className="text-neutral-500">-</span>}
+                        </td>
+                        <td className="p-2 text-right text-neutral-300">
+                          {formatted.bid > 0 ? `$${formatted.bid.toFixed(2)}` : <span className="text-neutral-500">-</span>}
+                        </td>
+                        <td className="p-2 text-right text-neutral-300">
+                          {formatted.ask > 0 ? `$${formatted.ask.toFixed(2)}` : <span className="text-neutral-500">-</span>}
+                        </td>
+                        <td className="p-2 text-right text-neutral-300">
+                          {formatted.impliedVolatility > 0 ? `${formatted.impliedVolatility.toFixed(1)}%` : <span className="text-neutral-500">-</span>}
+                        </td>
                       </tr>
                       {showPriceDivider && (
                         <tr>
-                          <td colSpan="6" className="p-0">
+                          <td colSpan="7" className="p-0">
                             <div className="flex items-center justify-center py-1 bg-green-600">
                               <span className="text-xs font-medium text-white px-3 py-0.5 rounded">
                                 Share price: ${currentPrice.toFixed(2)}
@@ -1073,7 +1083,7 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
           )}
 
           <p className="text-xs text-neutral-500 mt-3">
-            Data from Yahoo Finance (15-20 min delay). Check options to build a portfolio. <span className="text-green-400">Green bar</span> = current share price.
+            Data from Yahoo Finance (15-20 min delay). <span className="text-neutral-500">-</span> = no trading data. <span className="text-green-400">Green bar</span> = current share price.
           </p>
         </>
       )}
