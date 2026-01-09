@@ -341,37 +341,44 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
   const selectSuggestion = (portfolioData, positionIndex = 0) => {
     // Load the first position (or specified position) into the calculator
     const position = portfolioData.positions[positionIndex];
+    if (!position) {
+      console.error('No position found at index', positionIndex);
+      return;
+    }
+
     const formatted = formatOptionData(position.option);
     const optionType = formData.direction === 'bullish' ? 'call' : 'put';
 
+    // Use position.expiry (Unix timestamp) which is always set
+    const expirationTimestamp = position.expiry || position.option?.expiration;
+
     onSelectOption({
       ticker: formData.ticker.toUpperCase(),
-      stockPrice: currentPrice,
-      strikePrice: formatted.strike,
+      stockPrice: stockPrice,
+      strikePrice: position.strike || formatted.strike,
       premium: position.premium,
-      iv: formatted.impliedVolatility,
-      expirationDate: unixToDate(position.option.expiration),
+      iv: formatted.impliedVolatility || 30,
+      expirationDate: unixToDate(expirationTimestamp),
       optionType: optionType,
     });
 
-    // If portfolio has multiple positions, pass them all
-    if (portfolioData.positions.length > 1) {
-      const portfolioPositions = portfolioData.positions.map(pos => ({
+    // Build portfolio positions for all positions
+    const portfolioPositions = portfolioData.positions.map(pos => {
+      const posFormatted = formatOptionData(pos.option);
+      return {
         ticker: formData.ticker.toUpperCase(),
-        stockPrice: currentPrice,
+        stockPrice: stockPrice,
         strikePrice: pos.strike,
         premium: pos.premium,
-        iv: formatOptionData(pos.option).impliedVolatility,
+        iv: posFormatted.impliedVolatility || 30,
         expirationDate: unixToDate(pos.expiry),
         optionType: optionType,
         qty: pos.qty,
         costPer100: pos.costPer100,
         action: 'buy',
-      }));
-      onSelectPortfolio(portfolioPositions);
-    } else {
-      onSelectPortfolio([]);
-    }
+      };
+    });
+    onSelectPortfolio(portfolioPositions);
   };
 
   const resetBuilder = () => {
@@ -839,11 +846,11 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
         contractSymbol: option.contractSymbol,
         ticker: optionsData?.underlyingSymbol || ticker,
         stockPrice: optionsData?.underlyingPrice,
-        strikePrice: formatted.strike,
-        premium: getMidPrice(option),
-        iv: formatted.impliedVolatility,
-        expirationDate: unixToDate(option.expiration),
-        optionType: optionType === 'calls' ? 'call' : 'put',
+      strikePrice: formatted.strike,
+      premium: getMidPrice(option),
+      iv: formatted.impliedVolatility,
+      expirationDate: unixToDate(option.expiration),
+      optionType: optionType === 'calls' ? 'call' : 'put',
         qty,
         costPer100: getMidPrice(option) * 100,
       }]);
@@ -994,8 +1001,8 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
 
                   return (
                     <React.Fragment key={opt.contractSymbol}>
-                      <tr
-                        className={`border-t border-neutral-800 hover:bg-neutral-900/50 ${
+                    <tr
+                      className={`border-t border-neutral-800 hover:bg-neutral-900/50 ${
                           isSelected ? 'bg-green-900/30 border-l-2 border-l-green-500' : ''
                         } ${isITM ? 'bg-blue-900/20' : ''}`}
                       >
@@ -1016,10 +1023,10 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
                             className="w-14 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded text-white text-center"
                           />
                         </td>
-                        <td className="p-2 font-medium text-white">
-                          ${formatted.strike}
-                          {isITM && <span className="ml-1 text-xs text-blue-400">ITM</span>}
-                        </td>
+                      <td className="p-2 font-medium text-white">
+                        ${formatted.strike}
+                        {isITM && <span className="ml-1 text-xs text-blue-400">ITM</span>}
+                      </td>
                         <td className="p-2 text-right text-neutral-300">
                           {formatted.lastPrice > 0 ? `$${formatted.lastPrice.toFixed(2)}` : <span className="text-neutral-500">-</span>}
                         </td>
@@ -1031,8 +1038,8 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
                         </td>
                         <td className="p-2 text-right text-neutral-300">
                           {formatted.impliedVolatility > 0 ? `${formatted.impliedVolatility.toFixed(1)}%` : <span className="text-neutral-500">-</span>}
-                        </td>
-                      </tr>
+                      </td>
+                    </tr>
                       {showPriceDivider && (
                         <tr>
                           <td colSpan="7" className="p-0">
@@ -1817,7 +1824,7 @@ function GreeksDashboard({ greeks }) {
 
 // Payoff Chart Component
 function PayoffChart({ data, breakEven, optionType, portfolio, stockPrice }) {
-  const hasPortfolio = portfolio && portfolio.length > 1;
+  const hasPortfolio = portfolio && portfolio.length >= 1;
 
   // Generate combined portfolio PnL data
   const generatePortfolioData = () => {
@@ -1920,9 +1927,11 @@ function PayoffChart({ data, breakEven, optionType, portfolio, stockPrice }) {
 }
 
 // Multi-Date Risk Graph Component
-function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePrice, premium, ticker }) {
+function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePrice, premium, ticker, iv }) {
   const [showGraph, setShowGraph] = useState(true);
-  const [selectedDates, setSelectedDates] = useState([0, Math.floor(daysToExpiry / 2), daysToExpiry]);
+  // Use at least 1 for initial selectedDates calculation
+  const initialDays = Math.max(1, daysToExpiry);
+  const [selectedDates, setSelectedDates] = useState([0, Math.floor(initialDays / 2), initialDays]);
   const [ivAdjustment, setIvAdjustment] = useState(0); // -50 to +50 percent
   const [priceRangePercent, setPriceRangePercent] = useState(25); // Default 25% range
   const [customMinPrice, setCustomMinPrice] = useState('');
@@ -1931,18 +1940,33 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
 
   const hasPortfolio = portfolio && portfolio.length > 0;
 
+  // Update selectedDates when daysToExpiry changes
+  useEffect(() => {
+    const effectiveDays = Math.max(1, daysToExpiry);
+    setSelectedDates([0, Math.floor(effectiveDays / 2), effectiveDays]);
+  }, [daysToExpiry]);
+
   // Get ticker from portfolio if not passed directly
   const displayTicker = ticker || (hasPortfolio ? portfolio[0]?.ticker : null);
 
-  if (!stockPrice || daysToExpiry <= 0) return null;
+  // Get base IV from portfolio or props
+  const baseIVPercent = hasPortfolio
+    ? portfolio.reduce((sum, p) => sum + (p.iv || 30), 0) / portfolio.length
+    : (iv || 30);
+
+  // More lenient check - only need stockPrice
+  if (!stockPrice || stockPrice <= 0) return null;
+
+  // Use at least 1 day for calculations if expiring today (0 days)
+  const effectiveDaysToExpiry = Math.max(1, daysToExpiry);
 
   // Generate date options
   const dateOptions = [];
-  for (let d = 0; d <= daysToExpiry; d += Math.max(1, Math.floor(daysToExpiry / 10))) {
+  for (let d = 0; d <= effectiveDaysToExpiry; d += Math.max(1, Math.floor(effectiveDaysToExpiry / 10))) {
     dateOptions.push(d);
   }
-  if (!dateOptions.includes(daysToExpiry)) {
-    dateOptions.push(daysToExpiry);
+  if (!dateOptions.includes(effectiveDaysToExpiry)) {
+    dateOptions.push(effectiveDaysToExpiry);
   }
 
   // Calculate PnL for a given price and days from now
@@ -1975,8 +1999,8 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
       return totalPnL;
     } else {
       // Single option
-      const daysRemaining = daysToExpiry - daysFromNow;
-      const baseIV = 0.30;
+      const daysRemaining = effectiveDaysToExpiry - daysFromNow;
+      const baseIV = baseIVPercent / 100;
       const adjustedIV = baseIV * (1 + ivAdjustment / 100);
 
       let optionValue;
@@ -2168,19 +2192,30 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
           </div>
 
           {/* IV Adjustment Slider */}
-          <div className="mb-4 flex items-center gap-4">
-            <span className="text-xs text-neutral-400">IV Adjustment:</span>
-            <input
-              type="range"
-              min="-50"
-              max="50"
-              value={ivAdjustment}
-              onChange={(e) => setIvAdjustment(parseInt(e.target.value))}
-              className="flex-1 h-2 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-            />
-            <span className={`text-sm font-medium ${ivAdjustment >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {ivAdjustment >= 0 ? '+' : ''}{ivAdjustment}%
-            </span>
+          <div className="mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs text-neutral-400">Base IV:</span>
+              <span className="text-xs text-purple-400 font-medium">{baseIVPercent.toFixed(1)}%</span>
+              <span className="text-xs text-neutral-600">→</span>
+              <span className="text-xs text-neutral-400">Adjusted:</span>
+              <span className={`text-xs font-medium ${ivAdjustment >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {(baseIVPercent * (1 + ivAdjustment / 100)).toFixed(1)}%
+              </span>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-xs text-neutral-400">IV Adjustment:</span>
+              <input
+                type="range"
+                min="-50"
+                max="50"
+                value={ivAdjustment}
+                onChange={(e) => setIvAdjustment(parseInt(e.target.value))}
+                className="flex-1 h-2 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              />
+              <span className={`text-sm font-medium w-12 ${ivAdjustment >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {ivAdjustment >= 0 ? '+' : ''}{ivAdjustment}%
+              </span>
+            </div>
           </div>
 
           {/* Chart */}
@@ -2269,7 +2304,7 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
 }
 
 // PnL Heatmap Component
-function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfolio, stockPrice, optionType, strikePrice }) {
+function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfolio, stockPrice, optionType, strikePrice, expirationDate }) {
   const [displayMode, setDisplayMode] = useState('dollar'); // 'dollar' or 'percent'
   const [viewMode, setViewMode] = useState('expiry'); // 'expiry' or 'dateRange'
   const [interval, setInterval] = useState(7); // days between columns
@@ -2280,12 +2315,27 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
 
   if (!heatmapData || heatmapData.length === 0) return null;
 
-  // Check if we have a multi-position portfolio
-  const hasPortfolio = portfolio && portfolio.length > 1;
+  // Always use portfolio view - create virtual portfolio from single option if needed
+  const hasRealPortfolio = portfolio && portfolio.length >= 1;
+
+  // If no portfolio but we have single option data, create a virtual portfolio
+  const effectivePortfolio = hasRealPortfolio ? portfolio : (premium && strikePrice ? [{
+    strikePrice,
+    premium,
+    optionType,
+    expirationDate: expirationDate || new Date().toISOString().split('T')[0],
+    stockPrice,
+    qty: 1,
+    iv: 30,
+    action: 'buy',
+  }] : []);
+
+  // Always show enhanced view if we have any position data
+  const hasPortfolio = effectivePortfolio.length >= 1;
 
   // Calculate strike prices for portfolio or single option
   const allStrikes = hasPortfolio
-    ? portfolio.map(p => p.strikePrice)
+    ? effectivePortfolio.map(p => p.strikePrice)
     : [strikePrice];
   const minStrike = Math.min(...allStrikes);
   const maxStrike = Math.max(...allStrikes);
@@ -2332,7 +2382,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
 
   // Get unique expiry dates from portfolio, sorted
   const portfolioExpiries = hasPortfolio
-    ? [...new Set(portfolio.map(p => p.expirationDate))].sort()
+    ? [...new Set(effectivePortfolio.map(p => p.expirationDate))].sort()
     : [];
 
   // Calculate days to each portfolio expiry
@@ -2387,7 +2437,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
     if (!hasPortfolio) return 0;
 
     let totalPnL = 0;
-    for (const pos of portfolio) {
+    for (const pos of effectivePortfolio) {
       // Only include positions that expire on THIS specific date
       if (pos.expirationDate === targetExpiry) {
         const qty = pos.qty || 1;
@@ -2409,7 +2459,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
     const r = 0.05; // risk-free rate
     const sigma = 0.30; // default IV
 
-    for (const pos of portfolio) {
+    for (const pos of effectivePortfolio) {
       const qty = pos.qty || 1;
       const posExpDays = daysBetween(new Date(), new Date(pos.expirationDate));
       const daysRemaining = posExpDays - daysFromNow;
@@ -2441,7 +2491,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
 
     for (const exp of portfolioExpiryDays) {
       let expiryPnL = 0;
-      const positionsForExpiry = portfolio.filter(p => p.expirationDate === exp.date);
+      const positionsForExpiry = effectivePortfolio.filter(p => p.expirationDate === exp.date);
       const daysRemaining = exp.days - daysFromNow;
       const isExpired = daysRemaining <= 0;
 
@@ -2480,7 +2530,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
     if (!hasPortfolio) return premium * 100;
 
     let totalCost = 0;
-    for (const pos of portfolio) {
+    for (const pos of effectivePortfolio) {
       if (pos.expirationDate === targetExpiry) {
         const qty = pos.qty || 1;
         totalCost += (pos.costPer100 || pos.premium * 100) * qty;
@@ -2491,7 +2541,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
 
   // Get total portfolio cost
   const totalPortfolioCost = hasPortfolio
-    ? portfolio.reduce((sum, p) => sum + (p.costPer100 || p.premium * 100) * (p.qty || 1), 0)
+    ? effectivePortfolio.reduce((sum, p) => sum + (p.costPer100 || p.premium * 100) * (p.qty || 1), 0)
     : premium * 100;
 
   const getColor = (value, isPercent = false) => {
@@ -2522,71 +2572,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
 
   const isExpiryColumn = (day) => day === daysToExpiry;
 
-  // For single option mode, just show the standard heatmap
-  if (!hasPortfolio) {
-    return (
-      <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-white">PnL Heatmap (Price x Days)</h2>
-          <div className="flex gap-1 bg-neutral-900 rounded-lg p-1">
-            <button
-              onClick={() => setDisplayMode('dollar')}
-              className={`px-3 py-1 text-sm rounded transition-all ${displayMode === 'dollar' ? 'bg-blue-600 text-white' : 'text-neutral-400 hover:text-white'}`}
-            >
-              $ PnL
-            </button>
-            <button
-              onClick={() => setDisplayMode('percent')}
-              className={`px-3 py-1 text-sm rounded transition-all ${displayMode === 'percent' ? 'bg-blue-600 text-white' : 'text-neutral-400 hover:text-white'}`}
-            >
-              % ROI
-            </button>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="p-2 text-left text-neutral-400">Price</th>
-                {dateIntervals.map((day) => (
-                  <th key={day} className={`p-2 text-center ${isExpiryColumn(day) ? 'text-yellow-400 font-bold bg-yellow-400/10' : 'text-neutral-400'}`}>
-                    {getColumnLabel(day)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {heatmapData.map((row, idx) => (
-                <tr key={idx}>
-                  <td className="p-2 text-neutral-300 font-medium">${row.stockPrice}</td>
-                  {dateIntervals.map((day) => {
-                    const dollarValue = row[`day${day}`];
-                    const percentValue = (dollarValue / premium) * 100;
-                    return (
-                      <td
-                        key={day}
-                        className="p-2 text-center font-medium"
-                        style={{ backgroundColor: getColor(displayMode === 'percent' ? percentValue : dollarValue * 10, displayMode === 'percent') }}
-                      >
-                        <span className={dollarValue >= 0 ? 'text-green-200' : 'text-red-200'}>
-                          {formatValue(dollarValue)}
-                        </span>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="text-xs text-neutral-500 mt-3">
-          The "Expiry" column shows PnL at expiration (intrinsic value only).
-        </p>
-      </div>
-    );
-  }
-
-  // Portfolio mode
+  // Portfolio mode styling
   const colorClasses = ['blue', 'purple', 'orange', 'green'];
   const colorHex = {
     blue: { text: '#60a5fa', bg: 'rgba(96, 165, 250, 0.1)', border: 'rgba(96, 165, 250, 0.5)' },
@@ -2734,13 +2720,13 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
       {viewMode === 'expiry' && (
         <div className="mb-3 flex flex-wrap gap-3">
           {portfolioExpiryDays.map((exp, idx) => {
-            const positionsForExpiry = portfolio.filter(p => p.expirationDate === exp.date);
+            const positionsForExpiry = effectivePortfolio.filter(p => p.expirationDate === exp.date);
             const cost = getCostForExpiryDate(exp.date);
             return (
               <div key={idx} className="flex items-center gap-2 text-xs bg-neutral-900 rounded px-2 py-1">
                 <div className={`w-3 h-3 rounded bg-${colorClasses[idx % colorClasses.length]}-500`}></div>
                 <span className="text-neutral-300">
-                  Exp {idx + 1}: {exp.date} ({exp.days}d) - {positionsForExpiry.length} pos, ${cost.toFixed(0)} cost
+                  {portfolioExpiryDays.length === 1 ? 'Expiry' : `Exp ${idx + 1}`}: {exp.date} ({exp.days}d) - {positionsForExpiry.length} pos, ${cost.toFixed(0)} cost
                 </span>
               </div>
           );
@@ -2761,24 +2747,27 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                       key={idx}
                       className={`p-2 text-center font-bold text-${colorClasses[idx % colorClasses.length]}-400 bg-${colorClasses[idx % colorClasses.length]}-400/10`}
                     >
-                      Expiry {idx + 1}
+                      {portfolioExpiryDays.length === 1 ? 'Expiry' : `Expiry ${idx + 1}`}
                       <div className="text-xs font-normal opacity-70">{exp.date}</div>
+                </th>
+              ))}
+                  {/* Only show Total PnL column when there are multiple expiry dates */}
+                  {portfolioExpiryDays.length > 1 && (
+                    <th className="p-2 text-center font-bold text-yellow-400 bg-yellow-400/10">
+                      Total PnL
+                      <div className="text-xs font-normal opacity-70">All positions</div>
                     </th>
-                  ))}
-                  <th className="p-2 text-center font-bold text-yellow-400 bg-yellow-400/10">
-                    Total PnL
-                    <div className="text-xs font-normal opacity-70">All positions</div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
+                  )}
+            </tr>
+          </thead>
+          <tbody>
                 {customPricePoints.map((price, idx) => {
                   const expiryPnLs = portfolioExpiryDays.map(exp => ({
                     pnl: calcPnLForExpiryDate(price, exp.date),
                     cost: getCostForExpiryDate(exp.date)
                   }));
                   const totalPnL = expiryPnLs.reduce((sum, e) => sum + e.pnl, 0);
-                  const totalCost = portfolio.reduce((sum, p) => sum + (p.costPer100 || p.premium * 100) * (p.qty || 1), 0);
+                  const totalCost = effectivePortfolio.reduce((sum, p) => sum + (p.costPer100 || p.premium * 100) * (p.qty || 1), 0);
                   const nearStrike = isNearStrike(price);
 
                   return (
@@ -2790,30 +2779,33 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                       </td>
                       {expiryPnLs.map((expData, expIdx) => {
                         const percentValue = expData.cost > 0 ? (expData.pnl / expData.cost) * 100 : 0;
-                        return (
-                          <td
+                  return (
+                    <td
                             key={expIdx}
                             className={`p-2 text-center font-medium border-x border-${colorClasses[expIdx % colorClasses.length]}-400/30`}
                             style={{ backgroundColor: getColor(displayMode === 'percent' ? percentValue : expData.pnl, displayMode === 'percent') }}
                           >
                             <span className={expData.pnl >= 0 ? 'text-green-200' : 'text-red-200'}>
                               {displayMode === 'percent'
-                                ? `${percentValue >= 0 ? '+' : ''}${percentValue.toFixed(0)}%`
+                              ? `${percentValue >= 0 ? '+' : ''}${percentValue.toFixed(0)}%`
                                 : `$${expData.pnl.toFixed(0)}`}
-                            </span>
-                          </td>
-                        );
-                      })}
-                      <td
-                        className="p-2 text-center font-bold border-x border-yellow-400/30"
-                        style={{ backgroundColor: getColor(displayMode === 'percent' ? (totalPnL / totalCost) * 100 : totalPnL, displayMode === 'percent') }}
-                      >
-                        <span className={totalPnL >= 0 ? 'text-green-200' : 'text-red-200'}>
-                          {displayMode === 'percent'
-                            ? `${(totalPnL / totalCost) * 100 >= 0 ? '+' : ''}${((totalPnL / totalCost) * 100).toFixed(0)}%`
-                            : `$${totalPnL.toFixed(0)}`}
-                        </span>
-                      </td>
+                      </span>
+                    </td>
+                  );
+                })}
+                      {/* Only show Total PnL cell when there are multiple expiry dates */}
+                      {portfolioExpiryDays.length > 1 && (
+                        <td
+                          className="p-2 text-center font-bold border-x border-yellow-400/30"
+                          style={{ backgroundColor: getColor(displayMode === 'percent' ? (totalPnL / totalCost) * 100 : totalPnL, displayMode === 'percent') }}
+                        >
+                          <span className={totalPnL >= 0 ? 'text-green-200' : 'text-red-200'}>
+                            {displayMode === 'percent'
+                              ? `${(totalPnL / totalCost) * 100 >= 0 ? '+' : ''}${((totalPnL / totalCost) * 100).toFixed(0)}%`
+                              : `$${totalPnL.toFixed(0)}`}
+                          </span>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -2823,8 +2815,14 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
           <div className="mt-3 p-3 bg-neutral-900/50 rounded border border-neutral-800">
             <p className="text-xs text-neutral-400 font-medium mb-2">📊 How to read this chart:</p>
             <ul className="text-xs text-neutral-500 space-y-1">
-              <li>• <span className="text-blue-400">Expiry columns</span> show PnL for positions expiring <span className="text-white">ONLY on that date</span></li>
-              <li>• <span className="text-yellow-400">Total PnL</span> column = sum of all expiry columns (combined portfolio PnL)</li>
+              {portfolioExpiryDays.length > 1 ? (
+                <>
+                  <li>• <span className="text-blue-400">Expiry columns</span> show PnL for positions expiring <span className="text-white">ONLY on that date</span></li>
+                  <li>• <span className="text-yellow-400">Total PnL</span> column = sum of all expiry columns (combined portfolio PnL)</li>
+                </>
+              ) : (
+                <li>• Shows PnL at expiration for all positions</li>
+              )}
               <li>• PnL = (intrinsic value - premium paid) × 100 shares × quantity</li>
               <li>• Intrinsic value: <span className="text-green-400">Call</span> = max(0, stock - strike), <span className="text-red-400">Put</span> = max(0, strike - stock)</li>
             </ul>
@@ -2887,8 +2885,8 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                         tooltipLines.push(`Total: $${pnl.toFixed(0)}`);
                         const tooltip = tooltipLines.join('\n');
 
-                        return (
-                          <td
+                  return (
+                    <td
                             key={dayIdx}
                             className="p-2 text-center font-medium cursor-help"
                             title={tooltip}
@@ -2896,21 +2894,21 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                               backgroundColor: getColor(displayMode === 'percent' ? percentValue : pnl, displayMode === 'percent'),
                               ...(isExpiry ? { borderLeft: `2px solid ${colors.border}`, borderRight: `2px solid ${colors.border}` } : {})
                             }}
-                          >
-                            <span className={pnl >= 0 ? 'text-green-200' : 'text-red-200'}>
-                              {displayMode === 'percent'
-                                ? `${percentValue >= 0 ? '+' : ''}${percentValue.toFixed(0)}%`
-                                : `$${pnl.toFixed(0)}`}
-                            </span>
-                          </td>
-                        );
-                      })}
-                    </tr>
+                    >
+                      <span className={pnl >= 0 ? 'text-green-200' : 'text-red-200'}>
+                        {displayMode === 'percent'
+                          ? `${percentValue >= 0 ? '+' : ''}${percentValue.toFixed(0)}%`
+                          : `$${pnl.toFixed(0)}`}
+                      </span>
+                    </td>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </tr>
+                  );
+                })}
+          </tbody>
+        </table>
+      </div>
           <div className="mt-3 p-3 bg-neutral-900/50 rounded border border-neutral-800">
             <p className="text-xs text-neutral-400 font-medium mb-2">📊 How to read this chart:</p>
             <ul className="text-xs text-neutral-500 space-y-1">
@@ -2934,8 +2932,8 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry, portfolio }) {
   const maxLoss = values.premium;
   const maxGain = values.optionType === 'call' ? 'Unlimited' : (values.strikePrice - values.premium).toFixed(2);
 
-  // Calculate portfolio totals if multiple positions
-  const hasPortfolio = portfolio && portfolio.length > 1;
+  // Calculate portfolio totals (show portfolio view for 1+ positions)
+  const hasPortfolio = portfolio && portfolio.length >= 1;
   const portfolioTotalCost = hasPortfolio
     ? portfolio.reduce((sum, p) => sum + (p.costPer100 || p.premium * 100) * (p.qty || 1), 0)
     : null;
@@ -3315,23 +3313,23 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList, o
           return (
             <div key={idx} className={`bg-black/70 rounded-lg p-3 ${isInCompare(idx) ? 'ring-1 ring-purple-500' : ''}`}>
               <div className="flex items-center justify-between">
-                <div>
+            <div>
                   <div className="flex items-center gap-2 flex-wrap">
                     {/* Ticker badge */}
                     {ticker && (
                       <span className="text-sm font-bold text-white bg-blue-600 px-2 py-0.5 rounded">
                         {ticker}
-                      </span>
+              </span>
                     )}
                     <span className={`font-medium ${item.optionType === 'call' ? 'text-green-400' : 'text-red-400'}`}>
                       {item.optionType?.toUpperCase()}
-                    </span>
+              </span>
                     <span className="text-neutral-300">
                       ${item.strikePrice} @ ${item.premium}
                     </span>
                     <span className="text-neutral-500 text-sm">
                       {item.expirationDate}
-                    </span>
+              </span>
                   </div>
                   {livePnL && (
                     <div className="text-sm mt-1">
@@ -3345,33 +3343,33 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList, o
                       )}
                     </div>
                   )}
-                </div>
-                <div className="flex gap-1">
-                  <button
-                    onClick={() => onCompare(idx)}
-                    className={`px-2 py-1 text-xs rounded transition-colors ${
-                      isInCompare(idx)
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
-                    }`}
-                    title={isInCompare(idx) ? 'Remove from compare' : 'Add to compare'}
-                  >
-                    {isInCompare(idx) ? '✓' : '+'}
-                  </button>
-                  <button
+            </div>
+            <div className="flex gap-1">
+              <button
+                onClick={() => onCompare(idx)}
+                className={`px-2 py-1 text-xs rounded transition-colors ${
+                  isInCompare(idx)
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
+                }`}
+                title={isInCompare(idx) ? 'Remove from compare' : 'Add to compare'}
+              >
+                {isInCompare(idx) ? '✓' : '+'}
+              </button>
+              <button
                     onClick={() => onLoad(item)}
-                    className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white transition-colors"
-                  >
-                    Load
-                  </button>
-                  <button
-                    onClick={() => onDelete(idx)}
-                    className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded text-white transition-colors"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
+                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white transition-colors"
+              >
+                Load
+              </button>
+              <button
+                onClick={() => onDelete(idx)}
+                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded text-white transition-colors"
+              >
+                ×
+              </button>
+            </div>
+          </div>
             </div>
           );
         })}
@@ -3783,15 +3781,21 @@ function App() {
   }, []);
 
   const handleSelectOption = useCallback((optionData) => {
+    console.log('handleSelectOption called with:', optionData);
     setValues((prev) => ({
       ...prev,
       ...optionData,
-      iv: Math.round(optionData.iv),
+      iv: Math.round(optionData.iv || 30),
     }));
     setHasLoadedPosition(true);
   }, []);
 
   const handleSelectPortfolio = useCallback((positions) => {
+    if (!positions || !Array.isArray(positions)) {
+      console.error('handleSelectPortfolio received invalid positions:', positions);
+      return;
+    }
+
     setPortfolio(positions);
     if (positions.length > 0) {
       setHasLoadedPosition(true);
@@ -3824,12 +3828,12 @@ function App() {
                     Save Portfolio ({portfolio.length})
                   </button>
                 )}
-                <button
-                  onClick={handleSavePosition}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors"
-                >
-                  Save Position
-                </button>
+            <button
+              onClick={handleSavePosition}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors"
+            >
+              Save Position
+            </button>
               </div>
             )}
           </div>
@@ -3895,37 +3899,39 @@ function App() {
             ) : (
               /* Charts & Analysis - shown when position is loaded */
               <>
-                <SummaryPanel
-                  values={values}
-                  greeks={greeks}
-                  breakEven={breakEven}
-                  daysToExpiry={daysToExpiry}
-                  portfolio={portfolio}
-                />
+            <SummaryPanel
+              values={values}
+              greeks={greeks}
+              breakEven={breakEven}
+              daysToExpiry={daysToExpiry}
+              portfolio={portfolio}
+            />
                 <RiskGraph
-                  portfolio={portfolio}
-                  stockPrice={values.stockPrice}
+              portfolio={portfolio}
+              stockPrice={values.stockPrice}
                   daysToExpiry={daysToExpiry}
                   optionType={values.optionType}
                   strikePrice={values.strikePrice}
                   premium={values.premium}
                   ticker={values.ticker}
-                />
-                <PnLHeatmap
-                  heatmapData={heatmapData}
-                  dateIntervals={dateIntervals}
-                  premium={values.premium}
-                  daysToExpiry={daysToExpiry}
-                  portfolio={portfolio}
-                  stockPrice={values.stockPrice}
-                  optionType={values.optionType}
-                  strikePrice={values.strikePrice}
-                />
-                <CompareChart
-                  positions={compareList.map((idx) => savedPositions[idx]).filter(Boolean)}
-                  currentPosition={values}
-                  stockPrice={values.stockPrice}
-                />
+                  iv={values.iv}
+            />
+            <PnLHeatmap
+              heatmapData={heatmapData}
+              dateIntervals={dateIntervals}
+              premium={values.premium}
+              daysToExpiry={daysToExpiry}
+              portfolio={portfolio}
+              stockPrice={values.stockPrice}
+              optionType={values.optionType}
+              strikePrice={values.strikePrice}
+              expirationDate={values.expirationDate}
+            />
+            <CompareChart
+              positions={compareList.map((idx) => savedPositions[idx]).filter(Boolean)}
+              currentPosition={values}
+              stockPrice={values.stockPrice}
+            />
               </>
             )}
           </div>
