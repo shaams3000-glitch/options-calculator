@@ -3753,10 +3753,14 @@ function App() {
       ...optionData,
       iv: Math.round(optionData.iv),
     }));
+    setHasLoadedPosition(true);
   }, []);
 
   const handleSelectPortfolio = useCallback((positions) => {
     setPortfolio(positions);
+    if (positions.length > 0) {
+      setHasLoadedPosition(true);
+    }
   }, []);
 
   const handleStockPriceUpdate = useCallback((price) => {
