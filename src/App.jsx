@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   LineChart,
   Line,
@@ -970,48 +970,60 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
                 </tr>
               </thead>
               <tbody>
-                {options.map((opt) => {
+                {options.map((opt, idx) => {
                   const formatted = formatOptionData(opt);
                   const isITM = formatted.inTheMoney;
                   const isSelected = isOptionSelected(opt.contractSymbol);
-                  const isNearCurrentPrice = Math.abs(formatted.strike - currentPrice) < (currentPrice * 0.02); // Within 2%
+
+                  // Check if we need to show current price divider after this row
+                  const nextOpt = options[idx + 1];
+                  const nextFormatted = nextOpt ? formatOptionData(nextOpt) : null;
+                  const showPriceDivider = nextFormatted && isITM && !nextFormatted.inTheMoney;
 
                   return (
-                    <tr
-                      key={opt.contractSymbol}
-                      className={`border-t border-neutral-800 hover:bg-neutral-900/50 ${
-                        isSelected ? 'bg-green-900/30 border-l-2 border-l-green-500' : ''
-                      } ${isITM ? 'bg-blue-900/20' : ''} ${
-                        isNearCurrentPrice ? 'bg-yellow-900/30 border-l-2 border-l-yellow-500' : ''
-                      }`}
-                    >
-                      <td className="p-2 text-center">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={(e) => handleToggleOption(opt, e.target.checked)}
-                          className="w-4 h-4 accent-green-500 cursor-pointer"
-                        />
-                      </td>
-                      <td className="p-2">
-                        <input
-                          type="number"
-                          min="1"
-                          value={quantities[opt.contractSymbol] || 1}
-                          onChange={(e) => handleQtyChange(opt.contractSymbol, e.target.value)}
-                          className="w-14 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded text-white text-center"
-                        />
-                      </td>
-                      <td className="p-2 font-medium text-white">
-                        {isNearCurrentPrice && <span className="mr-1 text-yellow-400">▶</span>}
-                        ${formatted.strike}
-                        {isITM && <span className="ml-1 text-xs text-blue-400">ITM</span>}
-                        {isNearCurrentPrice && <span className="ml-1 text-xs text-yellow-400">(ATM)</span>}
-                      </td>
-                      <td className="p-2 text-right text-neutral-300">${formatted.bid.toFixed(2)}</td>
-                      <td className="p-2 text-right text-neutral-300">${formatted.ask.toFixed(2)}</td>
-                      <td className="p-2 text-right text-neutral-300">{formatted.impliedVolatility.toFixed(1)}%</td>
-                    </tr>
+                    <React.Fragment key={opt.contractSymbol}>
+                      <tr
+                        className={`border-t border-neutral-800 hover:bg-neutral-900/50 ${
+                          isSelected ? 'bg-green-900/30 border-l-2 border-l-green-500' : ''
+                        } ${isITM ? 'bg-blue-900/20' : ''}`}
+                      >
+                        <td className="p-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={(e) => handleToggleOption(opt, e.target.checked)}
+                            className="w-4 h-4 accent-green-500 cursor-pointer"
+                          />
+                        </td>
+                        <td className="p-2">
+                          <input
+                            type="number"
+                            min="1"
+                            value={quantities[opt.contractSymbol] || 1}
+                            onChange={(e) => handleQtyChange(opt.contractSymbol, e.target.value)}
+                            className="w-14 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded text-white text-center"
+                          />
+                        </td>
+                        <td className="p-2 font-medium text-white">
+                          ${formatted.strike}
+                          {isITM && <span className="ml-1 text-xs text-blue-400">ITM</span>}
+                        </td>
+                        <td className="p-2 text-right text-neutral-300">${formatted.bid.toFixed(2)}</td>
+                        <td className="p-2 text-right text-neutral-300">${formatted.ask.toFixed(2)}</td>
+                        <td className="p-2 text-right text-neutral-300">{formatted.impliedVolatility.toFixed(1)}%</td>
+                      </tr>
+                      {showPriceDivider && (
+                        <tr>
+                          <td colSpan="6" className="p-0">
+                            <div className="flex items-center justify-center py-1 bg-green-600">
+                              <span className="text-xs font-medium text-white px-3 py-0.5 rounded">
+                                Share price: ${currentPrice.toFixed(2)}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -1055,7 +1067,7 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
           )}
 
           <p className="text-xs text-neutral-500 mt-3">
-            Data from Yahoo Finance (15-20 min delay). Check options to build a portfolio. <span className="text-yellow-400">Yellow</span> = near current price.
+            Data from Yahoo Finance (15-20 min delay). Check options to build a portfolio. <span className="text-green-400">Green bar</span> = current share price.
           </p>
         </>
       )}
