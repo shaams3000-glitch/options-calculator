@@ -3009,12 +3009,42 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry, portfolio }) {
           </span>
         </div>
 
-        <div className="flex justify-between items-center py-2">
+        <div className="flex justify-between items-center py-2 border-b border-neutral-800">
           <span className="text-neutral-400">Max Gain</span>
           <span className="text-green-400 font-semibold">
             {typeof maxGain === 'string' ? maxGain : `$${maxGain}`}
           </span>
         </div>
+
+        {/* Greeks Section */}
+        {greeks && (
+          <div className="pt-3 mt-2">
+            <div className="text-sm text-neutral-500 mb-2">Greeks (per contract)</div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-neutral-900/50 rounded-lg p-2 text-center">
+                <div className="text-xs text-neutral-500">Delta</div>
+                <div className={`font-semibold ${greeks.delta >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                  {greeks.delta?.toFixed(3) || 'N/A'}
+                </div>
+              </div>
+              <div className="bg-neutral-900/50 rounded-lg p-2 text-center">
+                <div className="text-xs text-neutral-500">Theta</div>
+                <div className="text-red-400 font-semibold">
+                  {greeks.theta ? `$${greeks.theta.toFixed(3)}` : 'N/A'}
+                </div>
+              </div>
+              <div className="bg-neutral-900/50 rounded-lg p-2 text-center">
+                <div className="text-xs text-neutral-500">Vega</div>
+                <div className="text-blue-400 font-semibold">
+                  {greeks.vega ? `$${greeks.vega.toFixed(3)}` : 'N/A'}
+                </div>
+              </div>
+            </div>
+            <div className="text-xs text-neutral-600 mt-2">
+              Delta = price change per $1 stock move • Theta = daily time decay • Vega = sensitivity to IV change
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
