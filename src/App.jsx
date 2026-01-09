@@ -2582,6 +2582,9 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
   };
   const dateRangeIntervals = generateDateRangeIntervals();
 
+  // Check if all positions expire today/tomorrow (same-day expiry scenario)
+  const isSameDayExpiry = maxDaysToExpiry <= 1;
+
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
       <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
@@ -2622,8 +2625,8 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
         </div>
       </div>
 
-      {/* Date Range Controls */}
-      {viewMode === 'dateRange' && (
+      {/* Date Range Controls - hide for same-day expiry */}
+      {viewMode === 'dateRange' && !isSameDayExpiry && (
         <div className="mb-4 flex items-center gap-4">
           <span className="text-sm text-neutral-400">Interval:</span>
           <div className="flex gap-1">
@@ -2838,28 +2841,44 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
               <thead>
                 <tr>
                   <th className="p-2 text-left text-neutral-400">Stock Price</th>
-                  {dateRangeIntervals.map((day, idx) => {
-                    const expiryIdx = getExpiryIndexForDay(day);
-                    const isExpiry = expiryIdx >= 0;
-                    const expiryColorKey = isExpiry ? colorClasses[expiryIdx % colorClasses.length] : null;
-                    const colors = expiryColorKey ? colorHex[expiryColorKey] : null;
+                  {isSameDayExpiry ? (
+                    /* Single column for same-day expiry */
+                    <th
+                      className="p-2 text-center font-bold"
+                      style={{ color: colorHex.blue.text, backgroundColor: colorHex.blue.bg }}
+                    >
+                      Expiry
+                      <div className="text-xs opacity-70">Today</div>
+                    </th>
+                  ) : (
+                    /* Multiple columns for longer-dated positions */
+                    dateRangeIntervals.map((day, idx) => {
+                      const expiryIdx = getExpiryIndexForDay(day);
+                      const isExpiry = expiryIdx >= 0;
+                      const expiryColorKey = isExpiry ? colorClasses[expiryIdx % colorClasses.length] : null;
+                      const colors = expiryColorKey ? colorHex[expiryColorKey] : null;
 
-                    return (
-                      <th
-                        key={idx}
-                        className={`p-2 text-center ${isExpiry ? 'font-bold' : 'text-neutral-400'}`}
-                        style={isExpiry ? { color: colors.text, backgroundColor: colors.bg } : {}}
-                      >
-                        {day === 0 ? 'Today' : `+${day}d`}
-                        {isExpiry && <div className="text-xs opacity-70">Exp {expiryIdx + 1}</div>}
-                      </th>
-                    );
-                  })}
+                      return (
+                        <th
+                          key={idx}
+                          className={`p-2 text-center ${isExpiry ? 'font-bold' : 'text-neutral-400'}`}
+                          style={isExpiry ? { color: colors.text, backgroundColor: colors.bg } : {}}
+                        >
+                          {day === 0 ? 'Today' : `+${day}d`}
+                          {isExpiry && <div className="text-xs opacity-70">Exp {expiryIdx + 1}</div>}
+                        </th>
+                      );
+                    })
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {customPricePoints.map((price, idx) => {
                   const nearStrike = isNearStrike(price);
+                  // For same-day expiry, calculate PnL at expiry (day 0 or maxDaysToExpiry)
+                  const sameDayPnL = isSameDayExpiry ? calcPortfolioPnLAtDay(price, maxDaysToExpiry) : 0;
+                  const sameDayPercent = isSameDayExpiry && totalPortfolioCost > 0 ? (sameDayPnL / totalPortfolioCost) * 100 : 0;
+
                   return (
                     <tr key={idx} className={nearStrike ? 'border-y-2 border-yellow-500' : ''}>
                       <td className={`p-2 font-medium ${nearStrike ? 'bg-yellow-500/20 text-yellow-300 font-bold' : 'text-neutral-300'}`}>
@@ -2867,43 +2886,62 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                         ${price.toFixed(2)}
                         {nearStrike && <span className="ml-1 text-xs text-yellow-400">(Strike)</span>}
                       </td>
-                      {dateRangeIntervals.map((day, dayIdx) => {
-                        const pnl = calcPortfolioPnLAtDay(price, day);
-                        const percentValue = totalPortfolioCost > 0 ? (pnl / totalPortfolioCost) * 100 : 0;
-                        const expiryIdx = getExpiryIndexForDay(day);
-                        const isExpiry = expiryIdx >= 0;
-                        const expiryColorKey = isExpiry ? colorClasses[expiryIdx % colorClasses.length] : null;
-                        const colors = expiryColorKey ? colorHex[expiryColorKey] : null;
+                      {isSameDayExpiry ? (
+                        /* Single PnL cell for same-day expiry */
+                        <td
+                          className="p-2 text-center font-medium"
+                          style={{
+                            backgroundColor: getColor(displayMode === 'percent' ? sameDayPercent : sameDayPnL, displayMode === 'percent'),
+                            borderLeft: `2px solid ${colorHex.blue.border}`,
+                            borderRight: `2px solid ${colorHex.blue.border}`
+                          }}
+                        >
+                          <span className={sameDayPnL >= 0 ? 'text-green-200' : 'text-red-200'}>
+                            {displayMode === 'percent'
+                              ? `${sameDayPercent >= 0 ? '+' : ''}${sameDayPercent.toFixed(0)}%`
+                              : `$${sameDayPnL.toFixed(0)}`}
+                          </span>
+                        </td>
+                      ) : (
+                        /* Multiple PnL cells for longer-dated positions */
+                        dateRangeIntervals.map((day, dayIdx) => {
+                          const pnl = calcPortfolioPnLAtDay(price, day);
+                          const percentValue = totalPortfolioCost > 0 ? (pnl / totalPortfolioCost) * 100 : 0;
+                          const expiryIdx = getExpiryIndexForDay(day);
+                          const isExpiry = expiryIdx >= 0;
+                          const expiryColorKey = isExpiry ? colorClasses[expiryIdx % colorClasses.length] : null;
+                          const colors = expiryColorKey ? colorHex[expiryColorKey] : null;
 
-                        // Build tooltip with breakdown
-                        const breakdown = calcPnLBreakdownAtDay(price, day);
-                        const tooltipLines = breakdown.map(b => {
-                          const status = b.isExpired ? '(expired)' : `(${b.daysRemaining}d left)`;
-                          return `Exp ${b.expiryIdx + 1}: $${b.pnl.toFixed(0)} ${status}`;
-                        });
-                        tooltipLines.push(`─────────`);
-                        tooltipLines.push(`Total: $${pnl.toFixed(0)}`);
-                        const tooltip = tooltipLines.join('\n');
+                          // Build tooltip with breakdown
+                          const breakdown = calcPnLBreakdownAtDay(price, day);
+                          const tooltipLines = breakdown.map(b => {
+                            const status = b.isExpired ? '(expired)' : `(${b.daysRemaining}d left)`;
+                            return `Exp ${b.expiryIdx + 1}: $${b.pnl.toFixed(0)} ${status}`;
+                          });
+                          tooltipLines.push(`─────────`);
+                          tooltipLines.push(`Total: $${pnl.toFixed(0)}`);
+                          const tooltip = tooltipLines.join('\n');
 
-                  return (
-                    <td
-                            key={dayIdx}
-                            className="p-2 text-center font-medium cursor-help"
-                            title={tooltip}
-                            style={{
-                              backgroundColor: getColor(displayMode === 'percent' ? percentValue : pnl, displayMode === 'percent'),
-                              ...(isExpiry ? { borderLeft: `2px solid ${colors.border}`, borderRight: `2px solid ${colors.border}` } : {})
-                            }}
-                    >
-                      <span className={pnl >= 0 ? 'text-green-200' : 'text-red-200'}>
-                        {displayMode === 'percent'
-                          ? `${percentValue >= 0 ? '+' : ''}${percentValue.toFixed(0)}%`
-                          : `$${pnl.toFixed(0)}`}
-                      </span>
-                    </td>
-                  );
-                })}
-              </tr>
+                          return (
+                            <td
+                              key={dayIdx}
+                              className="p-2 text-center font-medium cursor-help"
+                              title={tooltip}
+                              style={{
+                                backgroundColor: getColor(displayMode === 'percent' ? percentValue : pnl, displayMode === 'percent'),
+                                ...(isExpiry ? { borderLeft: `2px solid ${colors.border}`, borderRight: `2px solid ${colors.border}` } : {})
+                              }}
+                            >
+                              <span className={pnl >= 0 ? 'text-green-200' : 'text-red-200'}>
+                                {displayMode === 'percent'
+                                  ? `${percentValue >= 0 ? '+' : ''}${percentValue.toFixed(0)}%`
+                                  : `$${pnl.toFixed(0)}`}
+                              </span>
+                            </td>
+                          );
+                        })
+                      )}
+                    </tr>
                   );
                 })}
           </tbody>
