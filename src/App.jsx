@@ -1814,7 +1814,7 @@ function GreeksDashboard({ greeks }) {
 function PayoffChart({ data, breakEven, optionType, portfolio, stockPrice }) {
   const hasPortfolio = portfolio && portfolio.length > 1;
 
-  // Generate combined portfolio P&L data
+  // Generate combined portfolio PnL data
   const generatePortfolioData = () => {
     if (!hasPortfolio || !stockPrice) return null;
 
@@ -1857,7 +1857,7 @@ function PayoffChart({ data, breakEven, optionType, portfolio, stockPrice }) {
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-xl font-semibold text-white">
-          {hasPortfolio ? 'Combined Portfolio P&L at Expiration' : 'P&L at Expiration'}
+          {hasPortfolio ? 'Combined Portfolio PnL at Expiration' : 'PnL at Expiration'}
         </h2>
         {hasPortfolio && (
           <span className="text-sm text-neutral-400">
@@ -1875,7 +1875,7 @@ function PayoffChart({ data, breakEven, optionType, portfolio, stockPrice }) {
           />
           <YAxis
             stroke="#9CA3AF"
-            label={{ value: 'P&L ($)', angle: -90, position: 'insideLeft', fill: '#9CA3AF' }}
+            label={{ value: 'PnL ($)', angle: -90, position: 'insideLeft', fill: '#9CA3AF' }}
           />
           <RechartsTooltip
             contentStyle={{
@@ -1884,7 +1884,7 @@ function PayoffChart({ data, breakEven, optionType, portfolio, stockPrice }) {
               borderRadius: '8px',
             }}
             labelStyle={{ color: '#9CA3AF' }}
-            formatter={(value) => [`$${value.toFixed(2)}`, hasPortfolio ? 'Portfolio P&L' : 'P&L']}
+            formatter={(value) => [`$${value.toFixed(2)}`, hasPortfolio ? 'Portfolio PnL' : 'PnL']}
             labelFormatter={(label) => `Stock: $${label}`}
           />
           <ReferenceLine y={0} stroke="#6B7280" strokeDasharray="5 5" />
@@ -1907,7 +1907,7 @@ function PayoffChart({ data, breakEven, optionType, portfolio, stockPrice }) {
       </ResponsiveContainer>
       {hasPortfolio && (
         <p className="text-xs text-neutral-500 mt-2">
-          Combined P&L across all {portfolio.length} positions at expiration (assumes all expire on the same date for simplicity)
+          Combined PnL across all {portfolio.length} positions at expiration (assumes all expire on the same date for simplicity)
         </p>
       )}
     </div>
@@ -1940,7 +1940,7 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
     dateOptions.push(daysToExpiry);
   }
 
-  // Calculate P&L for a given price and days from now
+  // Calculate PnL for a given price and days from now
   const calculatePnLAtDate = (price, daysFromNow) => {
     const r = 0.05;
 
@@ -2254,7 +2254,7 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
           </div>
 
           <p className="text-xs text-neutral-500 mt-3 text-center">
-            Shows projected P&L at different dates. Dashed line = Today. Thicker line = Expiration.
+            Shows projected PnL at different dates. Dashed line = Today. Thicker line = Expiration.
             {ivAdjustment !== 0 && ` IV adjusted by ${ivAdjustment}%.`}
           </p>
         </>
@@ -2263,7 +2263,7 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
   );
 }
 
-// P&L Heatmap Component
+// PnL Heatmap Component
 function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfolio, stockPrice, optionType, strikePrice }) {
   const [displayMode, setDisplayMode] = useState('dollar'); // 'dollar' or 'percent'
   const [viewMode, setViewMode] = useState('expiry'); // 'expiry' or 'dateRange'
@@ -2377,7 +2377,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
     return [...intervalsSet].sort((a, b) => a - b);
   };
 
-  // Calculate P&L for positions expiring on a SPECIFIC date only (not cumulative)
+  // Calculate PnL for positions expiring on a SPECIFIC date only (not cumulative)
   const calcPnLForExpiryDate = (price, targetExpiry) => {
     if (!hasPortfolio) return 0;
 
@@ -2389,14 +2389,14 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
         const intrinsic = pos.optionType === 'call'
           ? Math.max(0, price - pos.strikePrice)
           : Math.max(0, pos.strikePrice - price);
-        // P&L = (intrinsic - premium paid) * 100 shares * quantity
+        // PnL = (intrinsic - premium paid) * 100 shares * quantity
         totalPnL += (intrinsic - pos.premium) * 100 * qty;
       }
     }
     return totalPnL;
   };
 
-  // Calculate portfolio P&L at a specific day (using Black-Scholes for time value)
+  // Calculate portfolio PnL at a specific day (using Black-Scholes for time value)
   const calcPortfolioPnLAtDay = (price, daysFromNow) => {
     if (!hasPortfolio) return 0;
 
@@ -2427,7 +2427,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
     return totalPnL;
   };
 
-  // Calculate P&L breakdown by expiry for tooltip
+  // Calculate PnL breakdown by expiry for tooltip
   const calcPnLBreakdownAtDay = (price, daysFromNow) => {
     if (!hasPortfolio) return [];
 
@@ -2522,13 +2522,13 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
     return (
       <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-semibold text-white">P&L Heatmap (Price x Days)</h2>
+          <h2 className="text-xl font-semibold text-white">PnL Heatmap (Price x Days)</h2>
           <div className="flex gap-1 bg-neutral-900 rounded-lg p-1">
             <button
               onClick={() => setDisplayMode('dollar')}
               className={`px-3 py-1 text-sm rounded transition-all ${displayMode === 'dollar' ? 'bg-blue-600 text-white' : 'text-neutral-400 hover:text-white'}`}
             >
-              $ P&L
+              $ PnL
             </button>
             <button
               onClick={() => setDisplayMode('percent')}
@@ -2575,7 +2575,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
           </table>
         </div>
         <p className="text-xs text-neutral-500 mt-3">
-          The "Expiry" column shows P&L at expiration (intrinsic value only).
+          The "Expiry" column shows PnL at expiration (intrinsic value only).
         </p>
       </div>
     );
@@ -2595,7 +2595,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
       <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
         <h2 className="text-xl font-semibold text-white">
-          {viewMode === 'expiry' ? 'Portfolio P&L at Expiration' : 'Portfolio P&L Over Time'}
+          {viewMode === 'expiry' ? 'Portfolio PnL at Expiration' : 'Portfolio PnL Over Time'}
         </h2>
         <div className="flex gap-2">
           {/* View Mode Toggle */}
@@ -2619,7 +2619,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
               onClick={() => setDisplayMode('dollar')}
               className={`px-3 py-1 text-sm rounded transition-all ${displayMode === 'dollar' ? 'bg-blue-600 text-white' : 'text-neutral-400 hover:text-white'}`}
             >
-              $ P&L
+              $ PnL
             </button>
             <button
               onClick={() => setDisplayMode('percent')}
@@ -2761,7 +2761,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                     </th>
                   ))}
                   <th className="p-2 text-center font-bold text-yellow-400 bg-yellow-400/10">
-                    Total P&L
+                    Total PnL
                     <div className="text-xs font-normal opacity-70">All positions</div>
                   </th>
                 </tr>
@@ -2818,9 +2818,9 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
           <div className="mt-3 p-3 bg-neutral-900/50 rounded border border-neutral-800">
             <p className="text-xs text-neutral-400 font-medium mb-2">📊 How to read this chart:</p>
             <ul className="text-xs text-neutral-500 space-y-1">
-              <li>• <span className="text-blue-400">Expiry columns</span> show P&L for positions expiring <span className="text-white">ONLY on that date</span></li>
-              <li>• <span className="text-yellow-400">Total P&L</span> column = sum of all expiry columns (combined portfolio P&L)</li>
-              <li>• P&L = (intrinsic value - premium paid) × 100 shares × quantity</li>
+              <li>• <span className="text-blue-400">Expiry columns</span> show PnL for positions expiring <span className="text-white">ONLY on that date</span></li>
+              <li>• <span className="text-yellow-400">Total PnL</span> column = sum of all expiry columns (combined portfolio PnL)</li>
+              <li>• PnL = (intrinsic value - premium paid) × 100 shares × quantity</li>
               <li>• Intrinsic value: <span className="text-green-400">Call</span> = max(0, stock - strike), <span className="text-red-400">Put</span> = max(0, strike - stock)</li>
             </ul>
           </div>
@@ -2909,11 +2909,11 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
           <div className="mt-3 p-3 bg-neutral-900/50 rounded border border-neutral-800">
             <p className="text-xs text-neutral-400 font-medium mb-2">📊 How to read this chart:</p>
             <ul className="text-xs text-neutral-500 space-y-1">
-              <li>• Each cell shows <span className="text-white">TOTAL portfolio P&L</span> if the stock is at that price on that date</li>
-              <li>• <span className="text-blue-400">Colored columns</span> = expiry dates (when positions expire and lock in their P&L)</li>
+              <li>• Each cell shows <span className="text-white">TOTAL portfolio PnL</span> if the stock is at that price on that date</li>
+              <li>• <span className="text-blue-400">Colored columns</span> = expiry dates (when positions expire and lock in their PnL)</li>
               <li>• Before expiry: options have <span className="text-green-400">time value</span> (calculated via Black-Scholes)</li>
               <li>• At/after expiry: options have only <span className="text-yellow-400">intrinsic value</span> (stock price - strike)</li>
-              <li>• <span className="text-neutral-300">Hover over any cell</span> to see P&L breakdown by expiry date</li>
+              <li>• <span className="text-neutral-300">Hover over any cell</span> to see PnL breakdown by expiry date</li>
             </ul>
           </div>
         </>
@@ -3003,7 +3003,7 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry, portfolio }) {
         </div>
 
         <div className="flex justify-between items-center py-2 border-b border-neutral-800">
-          <span className="text-neutral-400">Current P&L</span>
+          <span className="text-neutral-400">Current PnL</span>
           <span className={`font-semibold ${currentPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
             ${currentPnL.toFixed(2)} ({((currentPnL / values.premium) * 100).toFixed(1)}%)
           </span>
@@ -3074,7 +3074,7 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList, o
     return () => clearInterval(interval);
   }, [autoRefresh, fetchLivePrices]);
 
-  // Calculate live P&L for a position/portfolio
+  // Calculate live PnL for a position/portfolio
   const calculateLivePnL = (item) => {
     const ticker = item.ticker || item.positions?.[0]?.ticker;
     const liveData = livePrices[ticker];
@@ -3173,7 +3173,7 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList, o
           const liveData = livePrices[ticker];
 
           if (isPortfolio) {
-            // Render portfolio with live P&L
+            // Render portfolio with live PnL
             const isEditing = editingIdx === idx;
             const displayName = item.name || `${ticker || 'Unknown'} Portfolio`;
 
@@ -3234,7 +3234,7 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList, o
                       </div>
                     )}
 
-                    {/* Cost and P&L */}
+                    {/* Cost and PnL */}
                     <div className="text-sm text-neutral-400 mt-1">
                       <span>Cost: ${item.totalCost?.toFixed(0)}</span>
                       {livePnL && (
@@ -3276,7 +3276,7 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList, o
             );
           }
 
-          // Render single position with live P&L
+          // Render single position with live PnL
           return (
             <div key={idx} className={`bg-black/70 rounded-lg p-3 ${isInCompare(idx) ? 'ring-1 ring-purple-500' : ''}`}>
               <div className="flex items-center justify-between">
@@ -3400,7 +3400,7 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList, o
   );
 }
 
-// Compare Chart Component - Compare P&L for multiple positions
+// Compare Chart Component - Compare PnL for multiple positions
 function CompareChart({ positions, currentPosition, stockPrice }) {
   const colors = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6'];
 
@@ -3434,14 +3434,14 @@ function CompareChart({ positions, currentPosition, stockPrice }) {
     return (
       <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
         <h2 className="text-xl font-semibold mb-4 text-white">Compare Positions</h2>
-        <p className="text-neutral-400 text-sm">Select positions from "Saved Positions" to compare their P&L charts.</p>
+        <p className="text-neutral-400 text-sm">Select positions from "Saved Positions" to compare their PnL charts.</p>
       </div>
     );
   }
 
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
-      <h2 className="text-xl font-semibold mb-4 text-white">Compare Positions (P&L at Expiry)</h2>
+      <h2 className="text-xl font-semibold mb-4 text-white">Compare Positions (PnL at Expiry)</h2>
 
       {/* Legend */}
       <div className="flex flex-wrap gap-3 mb-4">
@@ -3465,7 +3465,7 @@ function CompareChart({ positions, currentPosition, stockPrice }) {
           />
           <YAxis
             stroke="#9CA3AF"
-            label={{ value: 'P&L ($)', angle: -90, position: 'insideLeft', fill: '#9CA3AF' }}
+            label={{ value: 'PnL ($)', angle: -90, position: 'insideLeft', fill: '#9CA3AF' }}
           />
           <RechartsTooltip
             contentStyle={{
@@ -3777,7 +3777,7 @@ function App() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-white">
-              Options Profit Projection
+              Options PnL Calculator
             </h1>
             {hasLoadedPosition && (
               <div className="flex gap-2">
@@ -3837,9 +3837,9 @@ function App() {
               /* Welcome Message - shown when no position is loaded */
               <div className="bg-black/50 rounded-xl p-8 border border-neutral-800 text-center">
                 <div className="text-6xl mb-6">📈</div>
-                <h2 className="text-2xl font-bold text-white mb-4">Welcome to Options Profit Projection</h2>
+                <h2 className="text-2xl font-bold text-white mb-4">Welcome to Options PnL Calculator</h2>
                 <p className="text-neutral-400 mb-6 max-w-md mx-auto">
-                  Get started by looking up real options data or building a strategy. Your P&L projections, risk graphs, and analysis will appear here.
+                  Get started by looking up real options data or building a strategy. Your PnL projections, risk graphs, and analysis will appear here.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg mx-auto">
                   <div className="bg-neutral-900/50 rounded-lg p-4 border border-neutral-700">
