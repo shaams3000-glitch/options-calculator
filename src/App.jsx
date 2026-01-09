@@ -1701,7 +1701,7 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry, portfolio }) {
 
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
-      <h2 className="text-xl font-semibold mb-4 text-white">Position Summary</h2>
+      <h2 className="text-xl font-semibold mb-4 text-white">Position Summary - ${values.ticker?.toUpperCase() || 'N/A'}</h2>
 
       <div className="space-y-3">
         {/* Show multiple expiry dates if portfolio */}
