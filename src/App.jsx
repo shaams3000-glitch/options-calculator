@@ -3819,7 +3819,6 @@ function App() {
   }, []);
 
   const handleSelectOption = useCallback((optionData) => {
-    console.log('handleSelectOption called with:', optionData);
     setValues((prev) => ({
       ...prev,
       ...optionData,
