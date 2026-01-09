@@ -3357,16 +3357,36 @@ function App() {
     }]);
   }, [portfolio, values.ticker]);
 
-  const handleLoadPosition = useCallback((item) => {
+  const handleLoadPosition = useCallback(async (item) => {
+    const ticker = item.ticker || item.positions?.[0]?.ticker;
+
+    // Fetch fresh stock price if we have a ticker
+    let currentStockPrice = item.stockPrice || values.stockPrice;
+    if (ticker) {
+      try {
+        const quote = await fetchStockQuote(ticker);
+        currentStockPrice = quote.price;
+      } catch (err) {
+        console.error('Failed to fetch current price:', err);
+        // Fall back to saved stock price
+        currentStockPrice = item.positions?.[0]?.stockPrice || item.stockPrice || values.stockPrice;
+      }
+    }
+
     if (item.type === 'portfolio') {
-      // Load portfolio
-      setPortfolio(item.positions);
+      // Load portfolio with updated stock price
+      const updatedPositions = item.positions.map(pos => ({
+        ...pos,
+        stockPrice: currentStockPrice,
+      }));
+      setPortfolio(updatedPositions);
+
       // Load first position into values for display
       if (item.positions.length > 0) {
         const firstPos = item.positions[0];
         setValues({
-          ticker: firstPos.ticker || item.ticker || '',
-          stockPrice: firstPos.stockPrice || values.stockPrice,
+          ticker: ticker || '',
+          stockPrice: currentStockPrice,
           strikePrice: firstPos.strikePrice,
           premium: firstPos.premium,
           optionType: firstPos.optionType,
@@ -3378,11 +3398,14 @@ function App() {
     } else {
       // Load single position - also add to portfolio so charts update
       const { savedAt, type, ...positionValues } = item;
-      setValues(positionValues);
+      setValues({
+        ...positionValues,
+        stockPrice: currentStockPrice,
+      });
       // Convert single position to portfolio format for charts
       setPortfolio([{
         ticker: positionValues.ticker || '',
-        stockPrice: positionValues.stockPrice,
+        stockPrice: currentStockPrice,
         strikePrice: positionValues.strikePrice,
         premium: positionValues.premium,
         optionType: positionValues.optionType,
@@ -3539,13 +3562,6 @@ function App() {
               breakEven={breakEven}
               daysToExpiry={daysToExpiry}
               portfolio={portfolio}
-            />
-            <PayoffChart
-              data={payoffData}
-              breakEven={breakEven}
-              optionType={values.optionType}
-              portfolio={portfolio}
-              stockPrice={values.stockPrice}
             />
             <RiskGraph
               portfolio={portfolio}
