@@ -1303,7 +1303,7 @@ function StrategyBuilder({ onLoadStrategy, onStockPriceUpdate }) {
                               strategy.type === 'bullish' ? 'bg-green-900/50 text-green-400' :
                               strategy.type === 'bearish' ? 'bg-red-900/50 text-red-400' :
                               'bg-yellow-900/50 text-yellow-400'
-                            }`}>{strategy.type}</span>
+                            }`}>{strategy.type.charAt(0).toUpperCase() + strategy.type.slice(1)}</span>
                             {strategy.riskLevel && (
                               <span className={`text-xs px-2 py-0.5 rounded ${
                                 strategy.riskLevel === 'Low' ? 'bg-blue-900/50 text-blue-400' :
