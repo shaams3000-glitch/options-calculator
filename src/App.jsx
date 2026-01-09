@@ -2942,7 +2942,7 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry, portfolio }) {
 
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
-      <h2 className="text-xl font-semibold mb-4 text-white">Position Summary - ${values.ticker?.toUpperCase() || 'N/A'}</h2>
+      <h2 className="text-xl font-semibold mb-4 text-white">Position Summary - ${values.ticker?.toUpperCase() || portfolio?.[0]?.ticker?.toUpperCase() || 'N/A'}</h2>
 
       <div className="space-y-3">
         {/* Show multiple expiry dates if portfolio */}
@@ -2995,11 +2995,6 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry, portfolio }) {
             <InfoTooltip content={tooltipContent.breakeven}>Break-Even Price</InfoTooltip>
           </span>
           <span className="text-yellow-400 font-semibold">${breakEven.toFixed(2)}</span>
-        </div>
-
-        <div className="flex justify-between items-center py-2 border-b border-neutral-800">
-          <span className="text-neutral-400">Theoretical Value</span>
-          <span className="text-white font-semibold">${theoreticalPrice.toFixed(2)}</span>
         </div>
 
         <div className="flex justify-between items-center py-2 border-b border-neutral-800">
