@@ -1081,6 +1081,171 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onS
   );
 }
 
+// Strategy Templates Component
+function StrategyTemplates({ onBuildStrategy }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const strategies = [
+    {
+      name: 'Long Call',
+      type: 'bullish',
+      legs: 1,
+      description: 'Buy a call option. Profit if stock rises above strike + premium.',
+      maxProfit: 'Unlimited',
+      maxLoss: 'Premium paid',
+      icon: '📈',
+      build: (strike, expiry) => [
+        { optionType: 'call', action: 'buy', strikeOffset: 0 }
+      ]
+    },
+    {
+      name: 'Long Put',
+      type: 'bearish',
+      legs: 1,
+      description: 'Buy a put option. Profit if stock falls below strike - premium.',
+      maxProfit: 'Strike - Premium',
+      maxLoss: 'Premium paid',
+      icon: '📉',
+      build: (strike, expiry) => [
+        { optionType: 'put', action: 'buy', strikeOffset: 0 }
+      ]
+    },
+    {
+      name: 'Bull Call Spread',
+      type: 'bullish',
+      legs: 2,
+      description: 'Buy lower strike call, sell higher strike call. Limited risk & reward.',
+      maxProfit: 'Strike difference - Net debit',
+      maxLoss: 'Net debit',
+      icon: '🐂',
+      build: (strike, expiry) => [
+        { optionType: 'call', action: 'buy', strikeOffset: 0 },
+        { optionType: 'call', action: 'sell', strikeOffset: 5 }
+      ]
+    },
+    {
+      name: 'Bear Put Spread',
+      type: 'bearish',
+      legs: 2,
+      description: 'Buy higher strike put, sell lower strike put. Limited risk & reward.',
+      maxProfit: 'Strike difference - Net debit',
+      maxLoss: 'Net debit',
+      icon: '🐻',
+      build: (strike, expiry) => [
+        { optionType: 'put', action: 'buy', strikeOffset: 0 },
+        { optionType: 'put', action: 'sell', strikeOffset: -5 }
+      ]
+    },
+    {
+      name: 'Straddle',
+      type: 'neutral',
+      legs: 2,
+      description: 'Buy call AND put at same strike. Profit from big moves either direction.',
+      maxProfit: 'Unlimited',
+      maxLoss: 'Total premium paid',
+      icon: '↕️',
+      build: (strike, expiry) => [
+        { optionType: 'call', action: 'buy', strikeOffset: 0 },
+        { optionType: 'put', action: 'buy', strikeOffset: 0 }
+      ]
+    },
+    {
+      name: 'Strangle',
+      type: 'neutral',
+      legs: 2,
+      description: 'Buy OTM call AND OTM put. Cheaper than straddle, needs bigger move.',
+      maxProfit: 'Unlimited',
+      maxLoss: 'Total premium paid',
+      icon: '🔀',
+      build: (strike, expiry) => [
+        { optionType: 'call', action: 'buy', strikeOffset: 5 },
+        { optionType: 'put', action: 'buy', strikeOffset: -5 }
+      ]
+    },
+    {
+      name: 'Iron Condor',
+      type: 'neutral',
+      legs: 4,
+      description: 'Sell OTM put spread + OTM call spread. Profit if stock stays in range.',
+      maxProfit: 'Net credit received',
+      maxLoss: 'Wing width - Credit',
+      icon: '🦅',
+      build: (strike, expiry) => [
+        { optionType: 'put', action: 'buy', strikeOffset: -10 },
+        { optionType: 'put', action: 'sell', strikeOffset: -5 },
+        { optionType: 'call', action: 'sell', strikeOffset: 5 },
+        { optionType: 'call', action: 'buy', strikeOffset: 10 }
+      ]
+    },
+    {
+      name: 'Butterfly',
+      type: 'neutral',
+      legs: 4,
+      description: 'Buy 1 lower, sell 2 middle, buy 1 higher. Max profit if stock at middle strike.',
+      maxProfit: 'Wing width - Net debit',
+      maxLoss: 'Net debit',
+      icon: '🦋',
+      build: (strike, expiry) => [
+        { optionType: 'call', action: 'buy', strikeOffset: -5 },
+        { optionType: 'call', action: 'sell', strikeOffset: 0, qty: 2 },
+        { optionType: 'call', action: 'buy', strikeOffset: 5 }
+      ]
+    }
+  ];
+
+  const getTypeColor = (type) => {
+    switch (type) {
+      case 'bullish': return 'text-green-400 bg-green-900/20 border-green-700';
+      case 'bearish': return 'text-red-400 bg-red-900/20 border-red-700';
+      case 'neutral': return 'text-yellow-400 bg-yellow-900/20 border-yellow-700';
+      default: return 'text-neutral-400 bg-neutral-900/20 border-neutral-700';
+    }
+  };
+
+  return (
+    <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex justify-between items-center"
+      >
+        <h2 className="text-xl font-semibold text-white">Strategy Templates</h2>
+        <span className="text-neutral-400">{expanded ? '▼' : '▶'}</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-4 space-y-3">
+          <p className="text-sm text-neutral-400 mb-4">
+            Select a strategy to learn about it. Use the Options Lookup above to build positions.
+          </p>
+
+          {strategies.map((strategy, idx) => (
+            <div
+              key={idx}
+              className={`p-3 rounded-lg border ${getTypeColor(strategy.type)} cursor-pointer hover:opacity-80 transition-opacity`}
+              onClick={() => onBuildStrategy && onBuildStrategy(strategy)}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">{strategy.icon}</span>
+                  <div>
+                    <div className="font-medium">{strategy.name}</div>
+                    <div className="text-xs opacity-70">{strategy.legs} leg{strategy.legs > 1 ? 's' : ''} • {strategy.type}</div>
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs mt-2 opacity-80">{strategy.description}</p>
+              <div className="flex gap-4 mt-2 text-xs">
+                <span>Max Profit: <span className="text-green-400">{strategy.maxProfit}</span></span>
+                <span>Max Loss: <span className="text-red-400">{strategy.maxLoss}</span></span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Input Form Component - Simplified for beginners
 function OptionsForm({ values, onChange }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
