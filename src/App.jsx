@@ -1270,11 +1270,62 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
   const [displayMode, setDisplayMode] = useState('dollar'); // 'dollar' or 'percent'
   const [viewMode, setViewMode] = useState('expiry'); // 'expiry' or 'dateRange'
   const [interval, setInterval] = useState(7); // days between columns
+  const [rowCount, setRowCount] = useState(17); // number of price rows
+  const [priceRangeMode, setPriceRangeMode] = useState('default'); // 'default', 'custom', or preset names
+  const [customMinPrice, setCustomMinPrice] = useState('');
+  const [customMaxPrice, setCustomMaxPrice] = useState('');
 
   if (!heatmapData || heatmapData.length === 0) return null;
 
   // Check if we have a multi-position portfolio
   const hasPortfolio = portfolio && portfolio.length > 1;
+
+  // Calculate strike prices for portfolio or single option
+  const allStrikes = hasPortfolio
+    ? portfolio.map(p => p.strikePrice)
+    : [strikePrice];
+  const minStrike = Math.min(...allStrikes);
+  const maxStrike = Math.max(...allStrikes);
+
+  // Calculate price range based on mode
+  const getPriceRange = () => {
+    if (priceRangeMode === 'custom' && customMinPrice && customMaxPrice) {
+      return { min: parseFloat(customMinPrice), max: parseFloat(customMaxPrice) };
+    }
+
+    const currentPrice = stockPrice || minStrike;
+
+    switch (priceRangeMode) {
+      case 'pm10':
+        return { min: currentPrice * 0.9, max: currentPrice * 1.1 };
+      case 'pm20':
+        return { min: currentPrice * 0.8, max: currentPrice * 1.2 };
+      case 'pm30':
+        return { min: currentPrice * 0.7, max: currentPrice * 1.3 };
+      case 'below':
+        return { min: minStrike * 0.5, max: minStrike };
+      case 'above':
+        return { min: maxStrike, max: maxStrike * 1.5 };
+      case 'default':
+      default:
+        // Default: $20 below lowest strike up to 2x highest strike
+        return { min: Math.max(1, minStrike - 20), max: maxStrike * 2 };
+    }
+  };
+
+  const { min: rangeMin, max: rangeMax } = getPriceRange();
+
+  // Generate custom price points based on range and row count
+  const generatePricePoints = () => {
+    const step = (rangeMax - rangeMin) / (rowCount - 1);
+    const points = [];
+    for (let i = 0; i < rowCount; i++) {
+      points.push(parseFloat((rangeMax - i * step).toFixed(2)));
+    }
+    return points;
+  };
+
+  const customPricePoints = generatePricePoints();
 
   // Get unique expiry dates from portfolio, sorted
   const portfolioExpiries = hasPortfolio
@@ -1530,6 +1581,79 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
         </div>
       )}
 
+      {/* Price Range Controls */}
+      <div className="mb-4 p-3 bg-neutral-900/50 rounded-lg border border-neutral-800">
+        <div className="flex flex-wrap items-center gap-3 mb-2">
+          <span className="text-sm text-neutral-400">Price Range:</span>
+          <div className="flex flex-wrap gap-1">
+            {[
+              { key: 'default', label: 'Default' },
+              { key: 'pm10', label: '±10%' },
+              { key: 'pm20', label: '±20%' },
+              { key: 'pm30', label: '±30%' },
+              { key: 'below', label: 'Below Strike' },
+              { key: 'above', label: 'Above Strike' },
+            ].map(preset => (
+              <button
+                key={preset.key}
+                onClick={() => setPriceRangeMode(preset.key)}
+                className={`px-2 py-1 text-xs rounded transition-all ${priceRangeMode === preset.key ? 'bg-green-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm text-neutral-400">Custom:</span>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              placeholder="Min $"
+              value={customMinPrice}
+              onChange={(e) => {
+                setCustomMinPrice(e.target.value);
+                if (e.target.value && customMaxPrice) setPriceRangeMode('custom');
+              }}
+              className="w-20 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded text-white placeholder-neutral-500"
+            />
+            <span className="text-neutral-500">to</span>
+            <input
+              type="number"
+              placeholder="Max $"
+              value={customMaxPrice}
+              onChange={(e) => {
+                setCustomMaxPrice(e.target.value);
+                if (customMinPrice && e.target.value) setPriceRangeMode('custom');
+              }}
+              className="w-20 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded text-white placeholder-neutral-500"
+            />
+            <button
+              onClick={() => setPriceRangeMode('custom')}
+              className={`px-2 py-1 text-xs rounded transition-all ${priceRangeMode === 'custom' ? 'bg-green-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
+            >
+              Apply
+            </button>
+          </div>
+          <span className="text-neutral-500 mx-2">|</span>
+          <span className="text-sm text-neutral-400">Rows:</span>
+          <div className="flex gap-1">
+            {[10, 15, 17, 20, 25, 30].map(count => (
+              <button
+                key={count}
+                onClick={() => setRowCount(count)}
+                className={`px-2 py-1 text-xs rounded transition-all ${rowCount === count ? 'bg-blue-600 text-white' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}
+              >
+                {count}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="mt-2 text-xs text-neutral-500">
+          Range: ${rangeMin.toFixed(2)} - ${rangeMax.toFixed(2)} ({customPricePoints.length} rows)
+        </div>
+      </div>
+
       {/* Expiry View: Portfolio Expiry Legend */}
       {viewMode === 'expiry' && (
         <div className="mb-3 flex flex-wrap gap-3">
@@ -1572,9 +1696,9 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                 </tr>
               </thead>
               <tbody>
-                {heatmapData.map((row, idx) => {
+                {customPricePoints.map((price, idx) => {
                   const expiryPnLs = portfolioExpiryDays.map(exp => ({
-                    pnl: calcPnLForExpiryDate(row.stockPrice, exp.date),
+                    pnl: calcPnLForExpiryDate(price, exp.date),
                     cost: getCostForExpiryDate(exp.date)
                   }));
                   const totalPnL = expiryPnLs.reduce((sum, e) => sum + e.pnl, 0);
@@ -1582,7 +1706,7 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
 
                   return (
                     <tr key={idx}>
-                      <td className="p-2 text-neutral-300 font-medium">${row.stockPrice}</td>
+                      <td className="p-2 text-neutral-300 font-medium">${price.toFixed(2)}</td>
                       {expiryPnLs.map((expData, expIdx) => {
                         const percentValue = expData.cost > 0 ? (expData.pnl / expData.cost) * 100 : 0;
                         return (
@@ -1644,12 +1768,12 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                 </tr>
               </thead>
               <tbody>
-                {heatmapData.map((row, idx) => {
+                {customPricePoints.map((price, idx) => {
                   return (
                     <tr key={idx}>
-                      <td className="p-2 text-neutral-300 font-medium">${row.stockPrice}</td>
+                      <td className="p-2 text-neutral-300 font-medium">${price.toFixed(2)}</td>
                       {dateRangeIntervals.map((day, dayIdx) => {
-                        const pnl = calcPortfolioPnLAtDay(row.stockPrice, day);
+                        const pnl = calcPortfolioPnLAtDay(price, day);
                         const percentValue = totalPortfolioCost > 0 ? (pnl / totalPortfolioCost) * 100 : 0;
                         const isLastExpiry = day === maxDaysToExpiry;
                         return (
