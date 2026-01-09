@@ -1278,7 +1278,7 @@ function StrategyBuilder({ onLoadStrategy, onStockPriceUpdate }) {
 
               {/* Hover tooltip */}
               {hoveredStrategy && (
-                <div className="p-4 bg-neutral-900 border border-neutral-700 rounded-lg mb-3 max-h-[400px] overflow-y-auto">
+                <div className="p-4 bg-neutral-900 border border-neutral-700 rounded-lg mb-3 max-h-[400px] overflow-y-auto pointer-events-none">
                   <div className="flex items-center gap-2 mb-3">
                     <span className="text-xl">{strategyIcons[hoveredStrategy.key] || '📊'}</span>
                     <span className="font-semibold text-white text-lg">{hoveredStrategy.name}</span>
@@ -1988,9 +1988,36 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
       minPrice = Math.max(1, parseFloat(customMinPrice));
       maxPrice = parseFloat(customMaxPrice);
     } else {
+      // Calculate center price based on portfolio strikes or current stock price
+      let centerPrice = stockPrice;
+      let strikeMin = stockPrice;
+      let strikeMax = stockPrice;
+
+      if (hasPortfolio && portfolio.length > 0) {
+        const strikes = portfolio.map(p => p.strikePrice).filter(Boolean);
+        if (strikes.length > 0) {
+          strikeMin = Math.min(...strikes);
+          strikeMax = Math.max(...strikes);
+          centerPrice = (strikeMin + strikeMax) / 2;
+        }
+      } else if (strikePrice) {
+        centerPrice = strikePrice;
+        strikeMin = strikePrice;
+        strikeMax = strikePrice;
+      }
+
+      // Use the larger of: percentage range from center, or range that covers all strikes + buffer
       const priceRange = priceRangePercent / 100;
-      minPrice = Math.max(1, stockPrice * (1 - priceRange));
-      maxPrice = stockPrice * (1 + priceRange);
+      const percentMin = centerPrice * (1 - priceRange);
+      const percentMax = centerPrice * (1 + priceRange);
+
+      // Add 15% buffer around strike range
+      const strikeBuffer = (strikeMax - strikeMin) * 0.15 + centerPrice * 0.1;
+      const strikeRangeMin = strikeMin - strikeBuffer;
+      const strikeRangeMax = strikeMax + strikeBuffer;
+
+      minPrice = Math.max(1, Math.min(percentMin, strikeRangeMin));
+      maxPrice = Math.max(percentMax, strikeRangeMax);
     }
 
     const step = (maxPrice - minPrice) / 50;
@@ -3507,6 +3534,7 @@ function CompareChart({ positions, currentPosition, stockPrice }) {
 // Main App Component
 function App() {
   const [values, setValues] = useState({
+    ticker: '',
     optionType: 'call',
     stockPrice: 100,
     strikePrice: 105,
