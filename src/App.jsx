@@ -3376,10 +3376,21 @@ function App() {
         });
       }
     } else {
-      // Load single position
+      // Load single position - also add to portfolio so charts update
       const { savedAt, type, ...positionValues } = item;
       setValues(positionValues);
-      setPortfolio([]);
+      // Convert single position to portfolio format for charts
+      setPortfolio([{
+        ticker: positionValues.ticker || '',
+        stockPrice: positionValues.stockPrice,
+        strikePrice: positionValues.strikePrice,
+        premium: positionValues.premium,
+        optionType: positionValues.optionType,
+        expirationDate: positionValues.expirationDate,
+        iv: positionValues.iv || 30,
+        qty: 1,
+        action: 'buy',
+      }]);
     }
   }, [values.stockPrice]);
 
