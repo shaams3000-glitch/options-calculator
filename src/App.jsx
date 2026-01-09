@@ -2998,13 +2998,6 @@ function SummaryPanel({ values, greeks, breakEven, daysToExpiry, portfolio }) {
         </div>
 
         <div className="flex justify-between items-center py-2 border-b border-neutral-800">
-          <span className="text-neutral-400">Current PnL</span>
-          <span className={`font-semibold ${currentPnL >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            ${currentPnL.toFixed(2)} ({((currentPnL / values.premium) * 100).toFixed(1)}%)
-          </span>
-        </div>
-
-        <div className="flex justify-between items-center py-2 border-b border-neutral-800">
           <span className="text-neutral-400">Max Loss</span>
           <span className="text-red-400 font-semibold">
             {hasPortfolio ? `-$${portfolioTotalCost.toFixed(0)}` : `-$${maxLoss.toFixed(2)}`}
