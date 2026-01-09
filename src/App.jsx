@@ -1111,6 +1111,9 @@ function StrategyBuilder({ onLoadStrategy, onStockPriceUpdate }) {
   const [strikeWidth, setStrikeWidth] = useState(5);
   const [builtLegs, setBuiltLegs] = useState([]);
   const [metrics, setMetrics] = useState(null);
+  const [maxBudget, setMaxBudget] = useState('');
+  const [maxRisk, setMaxRisk] = useState('');
+  const [hoveredStrategy, setHoveredStrategy] = useState(null);
 
   const strategyIcons = {
     longCall: '📈', longPut: '📉', coveredCall: '💰',
@@ -1270,13 +1273,36 @@ function StrategyBuilder({ onLoadStrategy, onStockPriceUpdate }) {
           {step === 0 && !loading && (
             <div className="space-y-3">
               <p className="text-sm text-neutral-400 mb-4">
-                Select a strategy to build with real market prices:
+                Hover over a strategy for details. Click to select:
               </p>
+
+              {/* Hover tooltip */}
+              {hoveredStrategy && (
+                <div className="p-3 bg-neutral-900 border border-neutral-700 rounded-lg mb-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-lg">{strategyIcons[hoveredStrategy.key] || '📊'}</span>
+                    <span className="font-medium text-white">{hoveredStrategy.name}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded ${
+                      hoveredStrategy.type === 'bullish' ? 'bg-green-900/50 text-green-400' :
+                      hoveredStrategy.type === 'bearish' ? 'bg-red-900/50 text-red-400' :
+                      'bg-yellow-900/50 text-yellow-400'
+                    }`}>{hoveredStrategy.type}</span>
+                  </div>
+                  <p className="text-sm text-neutral-300 mb-2">{hoveredStrategy.description}</p>
+                  <div className="flex gap-4 text-xs">
+                    <span>Max Profit: <span className="text-green-400">{hoveredStrategy.maxProfit}</span></span>
+                    <span>Max Loss: <span className="text-red-400">{hoveredStrategy.maxLoss}</span></span>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2">
                 {Object.entries(STRATEGY_TEMPLATES).map(([key, strategy]) => (
                   <button
                     key={key}
                     onClick={() => handleSelectStrategy(key, strategy)}
+                    onMouseEnter={() => setHoveredStrategy({ key, ...strategy })}
+                    onMouseLeave={() => setHoveredStrategy(null)}
                     className={`p-3 rounded-lg border text-left transition-all hover:opacity-80 ${getTypeColor(strategy.type)}`}
                   >
                     <div className="flex items-center gap-2">
@@ -1328,6 +1354,47 @@ function StrategyBuilder({ onLoadStrategy, onStockPriceUpdate }) {
                   </button>
                 </div>
               </div>
+
+              {/* Budget & Risk Inputs */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-neutral-400 mb-1">
+                    Max Budget
+                    <span className="ml-1 text-neutral-500 cursor-help" title="Maximum amount you're willing to spend on this position (optional)">?</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">$</span>
+                    <input
+                      type="number"
+                      value={maxBudget}
+                      onChange={(e) => setMaxBudget(e.target.value)}
+                      placeholder="e.g., 500"
+                      className="w-full bg-neutral-900 border border-neutral-700 rounded-lg pl-7 pr-3 py-2 text-white"
+                      min="0"
+                      step="100"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-neutral-400 mb-1">
+                    Max Risk
+                    <span className="ml-1 text-neutral-500 cursor-help" title="Maximum loss you're willing to accept on this position (optional)">?</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">$</span>
+                    <input
+                      type="number"
+                      value={maxRisk}
+                      onChange={(e) => setMaxRisk(e.target.value)}
+                      placeholder="e.g., 200"
+                      className="w-full bg-neutral-900 border border-neutral-700 rounded-lg pl-7 pr-3 py-2 text-white"
+                      min="0"
+                      step="100"
+                    />
+                  </div>
+                </div>
+              </div>
+              <p className="text-xs text-neutral-500">Optional: Set limits to see warnings if strategy exceeds your budget or risk tolerance.</p>
 
               {optionsData && (
                 <>
@@ -1454,6 +1521,42 @@ function StrategyBuilder({ onLoadStrategy, onStockPriceUpdate }) {
                       </div>
                     </div>
                   </div>
+
+                  {/* Budget/Risk Warnings */}
+                  {(maxBudget || maxRisk) && (
+                    <div className="mt-3 pt-3 border-t border-neutral-700 space-y-2">
+                      {maxBudget && !metrics.isCredit && Math.abs(metrics.netPremium) > parseFloat(maxBudget) && (
+                        <div className="flex items-center gap-2 text-yellow-400 text-sm">
+                          <span>⚠️</span>
+                          <span>Cost (${Math.abs(metrics.netPremium).toFixed(0)}) exceeds your ${parseFloat(maxBudget).toFixed(0)} budget</span>
+                        </div>
+                      )}
+                      {maxBudget && !metrics.isCredit && Math.abs(metrics.netPremium) <= parseFloat(maxBudget) && (
+                        <div className="flex items-center gap-2 text-green-400 text-sm">
+                          <span>✓</span>
+                          <span>Within your ${parseFloat(maxBudget).toFixed(0)} budget</span>
+                        </div>
+                      )}
+                      {maxRisk && metrics.maxLoss !== -Infinity && Math.abs(metrics.maxLoss) > parseFloat(maxRisk) && (
+                        <div className="flex items-center gap-2 text-yellow-400 text-sm">
+                          <span>⚠️</span>
+                          <span>Max loss (${Math.abs(metrics.maxLoss).toFixed(0)}) exceeds your ${parseFloat(maxRisk).toFixed(0)} risk limit</span>
+                        </div>
+                      )}
+                      {maxRisk && metrics.maxLoss !== -Infinity && Math.abs(metrics.maxLoss) <= parseFloat(maxRisk) && (
+                        <div className="flex items-center gap-2 text-green-400 text-sm">
+                          <span>✓</span>
+                          <span>Risk within your ${parseFloat(maxRisk).toFixed(0)} limit</span>
+                        </div>
+                      )}
+                      {maxRisk && metrics.maxLoss === -Infinity && (
+                        <div className="flex items-center gap-2 text-red-400 text-sm">
+                          <span>⚠️</span>
+                          <span>Warning: This strategy has unlimited downside risk</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1944,17 +2047,28 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
                 tickFormatter={(v) => `$${v}`}
               />
               <RechartsTooltip
-                contentStyle={{
-                  backgroundColor: '#1F2937',
-                  border: '1px solid #374151',
-                  borderRadius: '8px',
+                content={({ active, payload, label }) => {
+                  if (!active || !payload || payload.length === 0) return null;
+                  // Sort payload by day number (ascending)
+                  const sortedPayload = [...payload].sort((a, b) => {
+                    const dayA = parseInt(a.dataKey.replace('day', ''));
+                    const dayB = parseInt(b.dataKey.replace('day', ''));
+                    return dayA - dayB;
+                  });
+                  return (
+                    <div className="bg-neutral-800 border border-neutral-600 rounded-lg p-3">
+                      <div className="text-neutral-400 mb-2">Stock: ${label}</div>
+                      {sortedPayload.map((entry, idx) => {
+                        const day = parseInt(entry.dataKey.replace('day', ''));
+                        return (
+                          <div key={idx} style={{ color: entry.color }} className="text-sm">
+                            {getDateLabel(day)} : ${entry.value.toFixed(2)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
                 }}
-                labelStyle={{ color: '#9CA3AF' }}
-                formatter={(value, name) => [
-                  `$${value.toFixed(2)}`,
-                  getDateLabel(parseInt(name.replace('day', '')))
-                ]}
-                labelFormatter={(label) => `Stock: $${label}`}
               />
               <ReferenceLine y={0} stroke="#6B7280" strokeDasharray="5 5" />
               <ReferenceLine
