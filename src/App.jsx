@@ -1278,20 +1278,50 @@ function StrategyBuilder({ onLoadStrategy, onStockPriceUpdate }) {
 
               {/* Hover tooltip */}
               {hoveredStrategy && (
-                <div className="p-3 bg-neutral-900 border border-neutral-700 rounded-lg mb-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-lg">{strategyIcons[hoveredStrategy.key] || '📊'}</span>
-                    <span className="font-medium text-white">{hoveredStrategy.name}</span>
+                <div className="p-4 bg-neutral-900 border border-neutral-700 rounded-lg mb-3 max-h-[400px] overflow-y-auto">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-xl">{strategyIcons[hoveredStrategy.key] || '📊'}</span>
+                    <span className="font-semibold text-white text-lg">{hoveredStrategy.name}</span>
                     <span className={`text-xs px-2 py-0.5 rounded ${
                       hoveredStrategy.type === 'bullish' ? 'bg-green-900/50 text-green-400' :
                       hoveredStrategy.type === 'bearish' ? 'bg-red-900/50 text-red-400' :
                       'bg-yellow-900/50 text-yellow-400'
                     }`}>{hoveredStrategy.type}</span>
+                    {hoveredStrategy.riskLevel && (
+                      <span className={`text-xs px-2 py-0.5 rounded ${
+                        hoveredStrategy.riskLevel === 'Low' ? 'bg-blue-900/50 text-blue-400' :
+                        hoveredStrategy.riskLevel === 'Low-Medium' ? 'bg-cyan-900/50 text-cyan-400' :
+                        hoveredStrategy.riskLevel === 'Medium' ? 'bg-purple-900/50 text-purple-400' :
+                        'bg-orange-900/50 text-orange-400'
+                      }`}>Risk: {hoveredStrategy.riskLevel}</span>
+                    )}
                   </div>
-                  <p className="text-sm text-neutral-300 mb-2">{hoveredStrategy.description}</p>
-                  <div className="flex gap-4 text-xs">
-                    <span>Max Profit: <span className="text-green-400">{hoveredStrategy.maxProfit}</span></span>
-                    <span>Max Loss: <span className="text-red-400">{hoveredStrategy.maxLoss}</span></span>
+
+                  <div className="space-y-3 text-sm">
+                    <div>
+                      <div className="text-neutral-500 text-xs uppercase tracking-wide mb-1">What is it?</div>
+                      <p className="text-neutral-300">{hoveredStrategy.description}</p>
+                    </div>
+
+                    {hoveredStrategy.whenToUse && (
+                      <div>
+                        <div className="text-neutral-500 text-xs uppercase tracking-wide mb-1">When to use</div>
+                        <p className="text-neutral-300">{hoveredStrategy.whenToUse}</p>
+                      </div>
+                    )}
+
+                    {hoveredStrategy.example && (
+                      <div>
+                        <div className="text-neutral-500 text-xs uppercase tracking-wide mb-1">Example</div>
+                        <p className="text-blue-300 bg-blue-900/20 p-2 rounded">{hoveredStrategy.example}</p>
+                      </div>
+                    )}
+
+                    <div className="flex gap-4 pt-2 border-t border-neutral-700">
+                      <span className="text-xs">Max Profit: <span className="text-green-400 font-medium">{hoveredStrategy.maxProfit}</span></span>
+                      <span className="text-xs">Max Loss: <span className="text-red-400 font-medium">{hoveredStrategy.maxLoss}</span></span>
+                      <span className="text-xs">Legs: <span className="text-neutral-300">{hoveredStrategy.legs}</span></span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1878,12 +1908,20 @@ function PayoffChart({ data, breakEven, optionType, portfolio, stockPrice }) {
 }
 
 // Multi-Date Risk Graph Component
-function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePrice, premium }) {
+function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePrice, premium, ticker }) {
   const [showGraph, setShowGraph] = useState(true);
   const [selectedDates, setSelectedDates] = useState([0, Math.floor(daysToExpiry / 2), daysToExpiry]);
   const [ivAdjustment, setIvAdjustment] = useState(0); // -50 to +50 percent
+  const [priceRangePercent, setPriceRangePercent] = useState(25); // Default 25% range
+  const [customMinPrice, setCustomMinPrice] = useState('');
+  const [customMaxPrice, setCustomMaxPrice] = useState('');
+  const [useCustomRange, setUseCustomRange] = useState(false);
 
   const hasPortfolio = portfolio && portfolio.length > 0;
+
+  // Get ticker from portfolio if not passed directly
+  const displayTicker = ticker || (hasPortfolio ? portfolio[0]?.ticker : null);
+
   if (!stockPrice || daysToExpiry <= 0) return null;
 
   // Generate date options
@@ -1944,12 +1982,17 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
 
   // Generate chart data with multiple date lines
   const generateMultiDateData = () => {
-    const priceRange = 0.25;
-    const centerPrice = hasPortfolio
-      ? portfolio.reduce((sum, p) => sum + p.strikePrice, 0) / portfolio.length
-      : strikePrice;
-    const minPrice = Math.max(1, stockPrice * (1 - priceRange));
-    const maxPrice = stockPrice * (1 + priceRange);
+    let minPrice, maxPrice;
+
+    if (useCustomRange && customMinPrice && customMaxPrice) {
+      minPrice = Math.max(1, parseFloat(customMinPrice));
+      maxPrice = parseFloat(customMaxPrice);
+    } else {
+      const priceRange = priceRangePercent / 100;
+      minPrice = Math.max(1, stockPrice * (1 - priceRange));
+      maxPrice = stockPrice * (1 + priceRange);
+    }
+
     const step = (maxPrice - minPrice) / 50;
 
     const chartData = [];
@@ -1986,7 +2029,13 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-semibold text-white">Risk Graph (Multi-Date)</h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-xl font-semibold text-white">Risk Graph</h2>
+          {displayTicker && (
+            <span className="px-2 py-1 bg-blue-600 text-white text-sm font-medium rounded">{displayTicker}</span>
+          )}
+          <span className="text-neutral-500 text-sm">${stockPrice?.toFixed(2)}</span>
+        </div>
         <button
           onClick={() => setShowGraph(!showGraph)}
           className="text-sm text-neutral-400 hover:text-white"
@@ -2015,6 +2064,68 @@ function RiskGraph({ portfolio, stockPrice, daysToExpiry, optionType, strikePric
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Price Range Controls */}
+          <div className="mb-4 p-3 bg-neutral-900/50 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs text-neutral-400">Price Range:</span>
+              <button
+                onClick={() => setUseCustomRange(!useCustomRange)}
+                className={`text-xs px-2 py-1 rounded ${useCustomRange ? 'bg-blue-600 text-white' : 'bg-neutral-700 text-neutral-400'}`}
+              >
+                {useCustomRange ? 'Custom' : 'Percentage'}
+              </button>
+            </div>
+
+            {!useCustomRange ? (
+              <div className="flex items-center gap-3">
+                <input
+                  type="range"
+                  min="10"
+                  max="50"
+                  value={priceRangePercent}
+                  onChange={(e) => setPriceRangePercent(parseInt(e.target.value))}
+                  className="flex-1 h-2 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                />
+                <span className="text-sm text-neutral-300 w-12">±{priceRangePercent}%</span>
+                <span className="text-xs text-neutral-500">
+                  (${(stockPrice * (1 - priceRangePercent/100)).toFixed(0)} - ${(stockPrice * (1 + priceRangePercent/100)).toFixed(0)})
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-neutral-500">Min:</span>
+                  <input
+                    type="number"
+                    value={customMinPrice}
+                    onChange={(e) => setCustomMinPrice(e.target.value)}
+                    placeholder={`${(stockPrice * 0.75).toFixed(0)}`}
+                    className="w-20 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm text-white"
+                  />
+                </div>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-neutral-500">Max:</span>
+                  <input
+                    type="number"
+                    value={customMaxPrice}
+                    onChange={(e) => setCustomMaxPrice(e.target.value)}
+                    placeholder={`${(stockPrice * 1.25).toFixed(0)}`}
+                    className="w-20 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-sm text-white"
+                  />
+                </div>
+                <button
+                  onClick={() => {
+                    setCustomMinPrice((stockPrice * 0.75).toFixed(0));
+                    setCustomMaxPrice((stockPrice * 1.25).toFixed(0));
+                  }}
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                >
+                  Reset
+                </button>
+              </div>
+            )}
           </div>
 
           {/* IV Adjustment Slider */}
@@ -3448,7 +3559,17 @@ function App() {
   }, [savedPositions]);
 
   const handleSavePosition = useCallback(() => {
-    setSavedPositions((prev) => [...prev, { ...values, type: 'position', savedAt: new Date().toISOString() }]);
+    const ticker = values.ticker ? values.ticker.toUpperCase() : '';
+    const optType = values.optionType === 'call' ? 'C' : 'P';
+    const strike = values.strikePrice ? `$${values.strikePrice}` : '';
+    const name = ticker ? `${ticker} ${strike} ${optType}` : `Position ${strike} ${optType}`;
+
+    setSavedPositions((prev) => [...prev, {
+      ...values,
+      type: 'position',
+      name,
+      savedAt: new Date().toISOString()
+    }]);
   }, [values]);
 
   const handleSavePortfolio = useCallback(() => {
@@ -3684,6 +3805,7 @@ function App() {
               optionType={values.optionType}
               strikePrice={values.strikePrice}
               premium={values.premium}
+              ticker={values.ticker}
             />
             <PnLHeatmap
               heatmapData={heatmapData}
