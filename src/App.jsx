@@ -1273,77 +1273,84 @@ function StrategyBuilder({ onLoadStrategy, onStockPriceUpdate }) {
           {step === 0 && !loading && (
             <div className="space-y-3">
               <p className="text-sm text-neutral-400 mb-4">
-                Hover over a strategy for details. Click to select:
+                Click a strategy to see details. Click "Use This" to build it:
               </p>
 
-              {/* Hover tooltip */}
-              {hoveredStrategy && (
-                <div className="p-4 bg-neutral-900 border border-neutral-700 rounded-lg mb-3 max-h-[400px] overflow-y-auto pointer-events-none">
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-xl">{strategyIcons[hoveredStrategy.key] || '📊'}</span>
-                    <span className="font-semibold text-white text-lg">{hoveredStrategy.name}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded ${
-                      hoveredStrategy.type === 'bullish' ? 'bg-green-900/50 text-green-400' :
-                      hoveredStrategy.type === 'bearish' ? 'bg-red-900/50 text-red-400' :
-                      'bg-yellow-900/50 text-yellow-400'
-                    }`}>{hoveredStrategy.type}</span>
-                    {hoveredStrategy.riskLevel && (
-                      <span className={`text-xs px-2 py-0.5 rounded ${
-                        hoveredStrategy.riskLevel === 'Low' ? 'bg-blue-900/50 text-blue-400' :
-                        hoveredStrategy.riskLevel === 'Low-Medium' ? 'bg-cyan-900/50 text-cyan-400' :
-                        hoveredStrategy.riskLevel === 'Medium' ? 'bg-purple-900/50 text-purple-400' :
-                        'bg-orange-900/50 text-orange-400'
-                      }`}>Risk: {hoveredStrategy.riskLevel}</span>
-                    )}
-                  </div>
-
-                  <div className="space-y-3 text-sm">
-                    <div>
-                      <div className="text-neutral-500 text-xs uppercase tracking-wide mb-1">What is it?</div>
-                      <p className="text-neutral-300">{hoveredStrategy.description}</p>
-                    </div>
-
-                    {hoveredStrategy.whenToUse && (
-                      <div>
-                        <div className="text-neutral-500 text-xs uppercase tracking-wide mb-1">When to use</div>
-                        <p className="text-neutral-300">{hoveredStrategy.whenToUse}</p>
-                      </div>
-                    )}
-
-                    {hoveredStrategy.example && (
-                      <div>
-                        <div className="text-neutral-500 text-xs uppercase tracking-wide mb-1">Example</div>
-                        <p className="text-blue-300 bg-blue-900/20 p-2 rounded">{hoveredStrategy.example}</p>
-                      </div>
-                    )}
-
-                    <div className="flex gap-4 pt-2 border-t border-neutral-700">
-                      <span className="text-xs">Max Profit: <span className="text-green-400 font-medium">{hoveredStrategy.maxProfit}</span></span>
-                      <span className="text-xs">Max Loss: <span className="text-red-400 font-medium">{hoveredStrategy.maxLoss}</span></span>
-                      <span className="text-xs">Legs: <span className="text-neutral-300">{hoveredStrategy.legs}</span></span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               <div className="grid grid-cols-2 gap-2">
-                {Object.entries(STRATEGY_TEMPLATES).map(([key, strategy]) => (
-                  <button
-                    key={key}
-                    onClick={() => handleSelectStrategy(key, strategy)}
-                    onMouseEnter={() => setHoveredStrategy({ key, ...strategy })}
-                    onMouseLeave={() => setHoveredStrategy(null)}
-                    className={`p-3 rounded-lg border text-left transition-all hover:opacity-80 ${getTypeColor(strategy.type)}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{strategyIcons[key] || '📊'}</span>
-                      <div>
-                        <div className="font-medium text-sm">{strategy.name}</div>
-                        <div className="text-xs opacity-70">{strategy.legs} leg{strategy.legs > 1 ? 's' : ''}</div>
-                      </div>
+                {Object.entries(STRATEGY_TEMPLATES).map(([key, strategy]) => {
+                  const isExpanded = hoveredStrategy?.key === key;
+                  return (
+                    <div key={key} className="relative">
+                      <button
+                        onClick={() => setHoveredStrategy(isExpanded ? null : { key, ...strategy })}
+                        className={`w-full p-3 rounded-lg border text-left transition-all hover:opacity-80 ${getTypeColor(strategy.type)} ${isExpanded ? 'ring-2 ring-white' : ''}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">{strategyIcons[key] || '📊'}</span>
+                          <div className="flex-1">
+                            <div className="font-medium text-sm">{strategy.name}</div>
+                            <div className="text-xs opacity-70">{strategy.legs} leg{strategy.legs > 1 ? 's' : ''}</div>
+                          </div>
+                          <span className="text-xs opacity-50">{isExpanded ? '▼' : '▶'}</span>
+                        </div>
+                      </button>
+
+                      {/* Expanded details */}
+                      {isExpanded && (
+                        <div className="mt-2 p-4 bg-neutral-900 border border-neutral-700 rounded-lg">
+                          <div className="flex items-center gap-2 mb-3 flex-wrap">
+                            <span className={`text-xs px-2 py-0.5 rounded ${
+                              strategy.type === 'bullish' ? 'bg-green-900/50 text-green-400' :
+                              strategy.type === 'bearish' ? 'bg-red-900/50 text-red-400' :
+                              'bg-yellow-900/50 text-yellow-400'
+                            }`}>{strategy.type}</span>
+                            {strategy.riskLevel && (
+                              <span className={`text-xs px-2 py-0.5 rounded ${
+                                strategy.riskLevel === 'Low' ? 'bg-blue-900/50 text-blue-400' :
+                                strategy.riskLevel === 'Low-Medium' ? 'bg-cyan-900/50 text-cyan-400' :
+                                strategy.riskLevel === 'Medium' ? 'bg-purple-900/50 text-purple-400' :
+                                'bg-orange-900/50 text-orange-400'
+                              }`}>Risk: {strategy.riskLevel}</span>
+                            )}
+                          </div>
+
+                          <div className="space-y-3 text-sm">
+                            <div>
+                              <div className="text-neutral-500 text-xs uppercase tracking-wide mb-1">What is it?</div>
+                              <p className="text-neutral-300">{strategy.description}</p>
+                            </div>
+
+                            {strategy.whenToUse && (
+                              <div>
+                                <div className="text-neutral-500 text-xs uppercase tracking-wide mb-1">When to use</div>
+                                <p className="text-neutral-300">{strategy.whenToUse}</p>
+                              </div>
+                            )}
+
+                            {strategy.example && (
+                              <div>
+                                <div className="text-neutral-500 text-xs uppercase tracking-wide mb-1">Example</div>
+                                <p className="text-blue-300 bg-blue-900/20 p-2 rounded text-xs">{strategy.example}</p>
+                              </div>
+                            )}
+
+                            <div className="flex gap-4 pt-2 border-t border-neutral-700">
+                              <span className="text-xs">Max Profit: <span className="text-green-400 font-medium">{strategy.maxProfit}</span></span>
+                              <span className="text-xs">Max Loss: <span className="text-red-400 font-medium">{strategy.maxLoss}</span></span>
+                            </div>
+
+                            <button
+                              onClick={() => handleSelectStrategy(key, strategy)}
+                              className="w-full mt-2 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium text-sm"
+                            >
+                              Use This Strategy
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -3805,8 +3812,6 @@ function App() {
               onLoadStrategy={handleLoadPortfolioFromLookup}
               onStockPriceUpdate={handleStockPriceUpdate}
             />
-            <OptionsForm values={values} onChange={setValues} />
-            <GreeksDashboard greeks={greeks} />
             <SavedPositions
               positions={savedPositions}
               onLoad={handleLoadPosition}
