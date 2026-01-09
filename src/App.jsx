@@ -769,13 +769,15 @@ function OptionsBuilder({ onSelectOption, onStockPriceUpdate, onSelectPortfolio 
 }
 
 // Ticker Search and Options Chain Component
-function TickerSearch({ onSelectOption, onStockPriceUpdate }) {
+function TickerSearch({ onSelectOption, onStockPriceUpdate, onLoadPortfolio, onSavePortfolio }) {
   const [ticker, setTicker] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [optionsData, setOptionsData] = useState(null);
   const [selectedExpiry, setSelectedExpiry] = useState('');
   const [optionType, setOptionType] = useState('calls');
+  const [selectedOptions, setSelectedOptions] = useState([]); // Array of selected options with qty
+  const [quantities, setQuantities] = useState({}); // contractSymbol -> qty mapping
 
   const handleSearch = async () => {
     if (!ticker.trim()) return;
@@ -783,6 +785,8 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate }) {
     setLoading(true);
     setError('');
     setOptionsData(null);
+    setSelectedOptions([]);
+    setQuantities({});
 
     try {
       const data = await fetchOptionsChain(ticker);
@@ -814,20 +818,62 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate }) {
     }
   };
 
-  const handleSelectOption = (option) => {
+  const handleToggleOption = (option, isChecked) => {
     const formatted = formatOptionData(option);
-    onSelectOption({
-      strikePrice: formatted.strike,
-      premium: getMidPrice(option),
-      iv: formatted.impliedVolatility,
-      expirationDate: unixToDate(option.expiration),
-      optionType: optionType === 'calls' ? 'call' : 'put',
-    });
+    const qty = quantities[option.contractSymbol] || 1;
+
+    if (isChecked) {
+      // Add to selected
+      setSelectedOptions(prev => [...prev, {
+        contractSymbol: option.contractSymbol,
+        ticker: optionsData?.underlyingSymbol || ticker,
+        stockPrice: optionsData?.underlyingPrice,
+        strikePrice: formatted.strike,
+        premium: getMidPrice(option),
+        iv: formatted.impliedVolatility,
+        expirationDate: unixToDate(option.expiration),
+        optionType: optionType === 'calls' ? 'call' : 'put',
+        qty,
+        costPer100: getMidPrice(option) * 100,
+      }]);
+    } else {
+      // Remove from selected
+      setSelectedOptions(prev => prev.filter(o => o.contractSymbol !== option.contractSymbol));
+    }
   };
+
+  const handleQtyChange = (contractSymbol, qty) => {
+    const newQty = Math.max(1, parseInt(qty) || 1);
+    setQuantities(prev => ({ ...prev, [contractSymbol]: newQty }));
+
+    // Update selected options if this one is selected
+    setSelectedOptions(prev => prev.map(o =>
+      o.contractSymbol === contractSymbol ? { ...o, qty: newQty } : o
+    ));
+  };
+
+  const isOptionSelected = (contractSymbol) => {
+    return selectedOptions.some(o => o.contractSymbol === contractSymbol);
+  };
+
+  const handleLoadPortfolio = () => {
+    if (selectedOptions.length === 0) return;
+    onLoadPortfolio(selectedOptions, optionsData?.underlyingSymbol || ticker);
+  };
+
+  const handleSavePortfolio = () => {
+    if (selectedOptions.length === 0) return;
+    onSavePortfolio(selectedOptions, optionsData?.underlyingSymbol || ticker);
+  };
+
+  const totalCost = selectedOptions.reduce((sum, o) => sum + (o.premium * 100 * o.qty), 0);
 
   const options = optionType === 'calls'
     ? optionsData?.options?.calls || []
     : optionsData?.options?.puts || [];
+
+  // Find the strike closest to current price
+  const currentPrice = optionsData?.underlyingPrice || 0;
 
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
@@ -911,43 +957,60 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate }) {
           </div>
 
           {/* Options Chain Table */}
-          <div className="max-h-64 overflow-y-auto">
+          <div className="max-h-72 overflow-y-auto">
             <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-neutral-900">
+              <thead className="sticky top-0 bg-neutral-900 z-10">
                 <tr className="text-neutral-400">
+                  <th className="p-2 text-center w-10">Select</th>
+                  <th className="p-2 text-center w-16">Qty</th>
                   <th className="p-2 text-left">Strike</th>
                   <th className="p-2 text-right">Bid</th>
                   <th className="p-2 text-right">Ask</th>
                   <th className="p-2 text-right">IV</th>
-                  <th className="p-2"></th>
                 </tr>
               </thead>
               <tbody>
                 {options.map((opt) => {
                   const formatted = formatOptionData(opt);
                   const isITM = formatted.inTheMoney;
+                  const isSelected = isOptionSelected(opt.contractSymbol);
+                  const isNearCurrentPrice = Math.abs(formatted.strike - currentPrice) < (currentPrice * 0.02); // Within 2%
+
                   return (
                     <tr
                       key={opt.contractSymbol}
                       className={`border-t border-neutral-800 hover:bg-neutral-900/50 ${
-                        isITM ? 'bg-blue-900/20' : ''
+                        isSelected ? 'bg-green-900/30 border-l-2 border-l-green-500' : ''
+                      } ${isITM ? 'bg-blue-900/20' : ''} ${
+                        isNearCurrentPrice ? 'bg-yellow-900/30 border-l-2 border-l-yellow-500' : ''
                       }`}
                     >
+                      <td className="p-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => handleToggleOption(opt, e.target.checked)}
+                          className="w-4 h-4 accent-green-500 cursor-pointer"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
+                          type="number"
+                          min="1"
+                          value={quantities[opt.contractSymbol] || 1}
+                          onChange={(e) => handleQtyChange(opt.contractSymbol, e.target.value)}
+                          className="w-14 px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded text-white text-center"
+                        />
+                      </td>
                       <td className="p-2 font-medium text-white">
+                        {isNearCurrentPrice && <span className="mr-1 text-yellow-400">▶</span>}
                         ${formatted.strike}
                         {isITM && <span className="ml-1 text-xs text-blue-400">ITM</span>}
+                        {isNearCurrentPrice && <span className="ml-1 text-xs text-yellow-400">(ATM)</span>}
                       </td>
                       <td className="p-2 text-right text-neutral-300">${formatted.bid.toFixed(2)}</td>
                       <td className="p-2 text-right text-neutral-300">${formatted.ask.toFixed(2)}</td>
                       <td className="p-2 text-right text-neutral-300">{formatted.impliedVolatility.toFixed(1)}%</td>
-                      <td className="p-2">
-                        <button
-                          onClick={() => handleSelectOption(opt)}
-                          className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white"
-                        >
-                          Use
-                        </button>
-                      </td>
                     </tr>
                   );
                 })}
@@ -955,8 +1018,44 @@ function TickerSearch({ onSelectOption, onStockPriceUpdate }) {
             </table>
           </div>
 
+          {/* Selected Options Summary Panel */}
+          {selectedOptions.length > 0 && (
+            <div className="mt-4 p-3 bg-green-900/20 border border-green-700 rounded-lg">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm font-medium text-green-400">
+                  Selected: {selectedOptions.length} option{selectedOptions.length > 1 ? 's' : ''}
+                </span>
+                <span className="text-sm font-bold text-white">
+                  Total Cost: ${totalCost.toFixed(2)}
+                </span>
+              </div>
+              <div className="max-h-24 overflow-y-auto mb-3">
+                {selectedOptions.map((opt, idx) => (
+                  <div key={idx} className="flex justify-between text-xs text-neutral-300 py-1 border-b border-neutral-800">
+                    <span>{opt.qty}x ${opt.strikePrice} {opt.optionType} ({opt.expirationDate})</span>
+                    <span>${(opt.premium * 100 * opt.qty).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleLoadPortfolio}
+                  className="flex-1 px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors"
+                >
+                  Load to Calculator
+                </button>
+                <button
+                  onClick={handleSavePortfolio}
+                  className="flex-1 px-3 py-2 text-sm bg-purple-600 hover:bg-purple-700 rounded-lg font-medium transition-colors"
+                >
+                  Save Portfolio
+                </button>
+              </div>
+            </div>
+          )}
+
           <p className="text-xs text-neutral-500 mt-3">
-            Data from Yahoo Finance (15-20 min delay). Click "Use" to load an option into the calculator.
+            Data from Yahoo Finance (15-20 min delay). Check options to build a portfolio. <span className="text-yellow-400">Yellow</span> = near current price.
           </p>
         </>
       )}
@@ -2335,17 +2434,20 @@ function App() {
 
     const totalCost = portfolio.reduce((sum, p) => sum + (p.costPer100 || p.premium * 100) * (p.qty || 1), 0);
     const expiries = [...new Set(portfolio.map(p => p.expirationDate))];
+    // Get ticker from first position or current values
+    const ticker = portfolio[0]?.ticker || values.ticker || '';
 
     setSavedPositions((prev) => [...prev, {
       type: 'portfolio',
-      name: `Portfolio (${portfolio.length} positions)`,
+      ticker,
+      name: `${ticker ? ticker.toUpperCase() + ' ' : ''}Portfolio (${portfolio.length} positions)`,
       positions: portfolio,
       totalCost,
       expiries,
       positionCount: portfolio.length,
       savedAt: new Date().toISOString(),
     }]);
-  }, [portfolio]);
+  }, [portfolio, values.ticker]);
 
   const handleLoadPosition = useCallback((item) => {
     if (item.type === 'portfolio') {
@@ -2355,6 +2457,7 @@ function App() {
       if (item.positions.length > 0) {
         const firstPos = item.positions[0];
         setValues({
+          ticker: firstPos.ticker || item.ticker || '',
           stockPrice: firstPos.stockPrice || values.stockPrice,
           strikePrice: firstPos.strikePrice,
           premium: firstPos.premium,
@@ -2375,6 +2478,41 @@ function App() {
   const handleDeletePosition = useCallback((index) => {
     setSavedPositions((prev) => prev.filter((_, i) => i !== index));
     setCompareList((prev) => prev.filter((i) => i !== index).map((i) => i > index ? i - 1 : i));
+  }, []);
+
+  // Handle loading portfolio from real options lookup
+  const handleLoadPortfolioFromLookup = useCallback((selectedOptions, tickerSymbol) => {
+    setPortfolio(selectedOptions);
+    if (selectedOptions.length > 0) {
+      const firstPos = selectedOptions[0];
+      setValues({
+        ticker: tickerSymbol,
+        stockPrice: firstPos.stockPrice,
+        strikePrice: firstPos.strikePrice,
+        premium: firstPos.premium,
+        optionType: firstPos.optionType,
+        expirationDate: firstPos.expirationDate,
+        iv: firstPos.iv || 30,
+        riskFreeRate: 5,
+      });
+    }
+  }, []);
+
+  // Handle saving portfolio from real options lookup
+  const handleSavePortfolioFromLookup = useCallback((selectedOptions, tickerSymbol) => {
+    const totalCost = selectedOptions.reduce((sum, p) => sum + (p.costPer100 || p.premium * 100) * (p.qty || 1), 0);
+    const expiries = [...new Set(selectedOptions.map(p => p.expirationDate))];
+
+    setSavedPositions((prev) => [...prev, {
+      type: 'portfolio',
+      ticker: tickerSymbol,
+      name: `${tickerSymbol.toUpperCase()} Portfolio (${selectedOptions.length} positions)`,
+      positions: selectedOptions,
+      totalCost,
+      expiries,
+      positionCount: selectedOptions.length,
+      savedAt: new Date().toISOString(),
+    }]);
   }, []);
 
   const handleToggleCompare = useCallback((index) => {
@@ -2449,6 +2587,8 @@ function App() {
             <TickerSearch
               onSelectOption={handleSelectOption}
               onStockPriceUpdate={handleStockPriceUpdate}
+              onLoadPortfolio={handleLoadPortfolioFromLookup}
+              onSavePortfolio={handleSavePortfolioFromLookup}
             />
             <OptionsForm values={values} onChange={setValues} />
             <GreeksDashboard greeks={greeks} />
