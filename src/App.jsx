@@ -1429,6 +1429,49 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
     return totalPnL;
   };
 
+  // Calculate P&L breakdown by expiry for tooltip
+  const calcPnLBreakdownAtDay = (price, daysFromNow) => {
+    if (!hasPortfolio) return [];
+
+    const r = 0.05;
+    const breakdown = [];
+
+    for (const exp of portfolioExpiryDays) {
+      let expiryPnL = 0;
+      const positionsForExpiry = portfolio.filter(p => p.expirationDate === exp.date);
+      const daysRemaining = exp.days - daysFromNow;
+      const isExpired = daysRemaining <= 0;
+
+      for (const pos of positionsForExpiry) {
+        const qty = pos.qty || 1;
+        let optionValue;
+
+        if (isExpired) {
+          optionValue = pos.optionType === 'call'
+            ? Math.max(0, price - pos.strikePrice)
+            : Math.max(0, pos.strikePrice - price);
+        } else {
+          const T = daysRemaining / 365;
+          const posIV = (pos.iv || 30) / 100;
+          optionValue = calculateOptionPrice(price, pos.strikePrice, T, r, posIV, pos.optionType);
+        }
+
+        expiryPnL += (optionValue - pos.premium) * 100 * qty;
+      }
+
+      breakdown.push({
+        expiry: exp.date,
+        expiryIdx: portfolioExpiryDays.indexOf(exp),
+        pnl: expiryPnL,
+        isExpired,
+        daysRemaining,
+        positionCount: positionsForExpiry.length
+      });
+    }
+
+    return breakdown;
+  };
+
   // Get cost for positions expiring on a specific date
   const getCostForExpiryDate = (targetExpiry) => {
     if (!hasPortfolio) return premium * 100;
@@ -1774,9 +1817,15 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-neutral-500 mt-3">
-            Each Expiry column shows P&L for positions expiring on that date. Total shows combined portfolio P&L.
-          </p>
+          <div className="mt-3 p-3 bg-neutral-900/50 rounded border border-neutral-800">
+            <p className="text-xs text-neutral-400 font-medium mb-2">📊 How to read this chart:</p>
+            <ul className="text-xs text-neutral-500 space-y-1">
+              <li>• <span className="text-blue-400">Expiry columns</span> show P&L for positions expiring <span className="text-white">ONLY on that date</span></li>
+              <li>• <span className="text-yellow-400">Total P&L</span> column = sum of all expiry columns (combined portfolio P&L)</li>
+              <li>• P&L = (intrinsic value - premium paid) × 100 shares × quantity</li>
+              <li>• Intrinsic value: <span className="text-green-400">Call</span> = max(0, stock - strike), <span className="text-red-400">Put</span> = max(0, strike - stock)</li>
+            </ul>
+          </div>
         </>
       )}
 
@@ -1825,10 +1874,21 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
                         const expiryColorKey = isExpiry ? colorClasses[expiryIdx % colorClasses.length] : null;
                         const colors = expiryColorKey ? colorHex[expiryColorKey] : null;
 
+                        // Build tooltip with breakdown
+                        const breakdown = calcPnLBreakdownAtDay(price, day);
+                        const tooltipLines = breakdown.map(b => {
+                          const status = b.isExpired ? '(expired)' : `(${b.daysRemaining}d left)`;
+                          return `Exp ${b.expiryIdx + 1}: $${b.pnl.toFixed(0)} ${status}`;
+                        });
+                        tooltipLines.push(`─────────`);
+                        tooltipLines.push(`Total: $${pnl.toFixed(0)}`);
+                        const tooltip = tooltipLines.join('\n');
+
                         return (
                           <td
                             key={dayIdx}
-                            className="p-2 text-center font-medium"
+                            className="p-2 text-center font-medium cursor-help"
+                            title={tooltip}
                             style={{
                               backgroundColor: getColor(displayMode === 'percent' ? percentValue : pnl, displayMode === 'percent'),
                               ...(isExpiry ? { borderLeft: `2px solid ${colors.border}`, borderRight: `2px solid ${colors.border}` } : {})
@@ -1848,9 +1908,16 @@ function PnLHeatmap({ heatmapData, dateIntervals, premium, daysToExpiry, portfol
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-neutral-500 mt-3">
-            Shows combined portfolio P&L at each date. Uses Black-Scholes for time value before expiry. Colored columns = expiry dates.
-          </p>
+          <div className="mt-3 p-3 bg-neutral-900/50 rounded border border-neutral-800">
+            <p className="text-xs text-neutral-400 font-medium mb-2">📊 How to read this chart:</p>
+            <ul className="text-xs text-neutral-500 space-y-1">
+              <li>• Each cell shows <span className="text-white">TOTAL portfolio P&L</span> if the stock is at that price on that date</li>
+              <li>• <span className="text-blue-400">Colored columns</span> = expiry dates (when positions expire and lock in their P&L)</li>
+              <li>• Before expiry: options have <span className="text-green-400">time value</span> (calculated via Black-Scholes)</li>
+              <li>• At/after expiry: options have only <span className="text-yellow-400">intrinsic value</span> (stock price - strike)</li>
+              <li>• <span className="text-neutral-300">Hover over any cell</span> to see P&L breakdown by expiry date</li>
+            </ul>
+          </div>
         </>
       )}
     </div>
