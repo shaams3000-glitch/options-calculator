@@ -1631,8 +1631,8 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList })
   if (positions.length === 0) {
     return (
       <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
-        <h2 className="text-xl font-semibold mb-4 text-white">Saved Positions</h2>
-        <p className="text-neutral-400 text-sm">No saved positions yet. Save your current analysis to compare later.</p>
+        <h2 className="text-xl font-semibold mb-4 text-white">Saved Positions & Portfolios</h2>
+        <p className="text-neutral-400 text-sm">No saved items yet. Save your current analysis or portfolio to compare later.</p>
       </div>
     );
   }
@@ -1641,48 +1641,88 @@ function SavedPositions({ positions, onLoad, onDelete, onCompare, compareList })
 
   return (
     <div className="bg-black/50 rounded-xl p-6 border border-neutral-800">
-      <h2 className="text-xl font-semibold mb-4 text-white">Saved Positions</h2>
-      <div className="space-y-2 max-h-48 overflow-y-auto">
-        {positions.map((pos, idx) => (
-          <div key={idx} className={`flex items-center justify-between bg-black/70 rounded-lg p-3 ${isInCompare(idx) ? 'ring-1 ring-purple-500' : ''}`}>
-            <div>
-              <span className={`font-medium ${pos.optionType === 'call' ? 'text-green-400' : 'text-red-400'}`}>
-                {pos.optionType.toUpperCase()}
-              </span>
-              <span className="text-neutral-300 ml-2">
-                ${pos.strikePrice} @ ${pos.premium}
-              </span>
-              <span className="text-neutral-500 text-sm ml-2">
-                {pos.expirationDate}
-              </span>
+      <h2 className="text-xl font-semibold mb-4 text-white">Saved Positions & Portfolios</h2>
+      <div className="space-y-2 max-h-64 overflow-y-auto">
+        {positions.map((item, idx) => {
+          const isPortfolio = item.type === 'portfolio';
+
+          if (isPortfolio) {
+            // Render portfolio
+            return (
+              <div key={idx} className="bg-black/70 rounded-lg p-3 border border-purple-500/30">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded">PORTFOLIO</span>
+                      <span className="text-white font-medium">{item.positionCount} positions</span>
+                    </div>
+                    <div className="text-sm text-neutral-400 mt-1">
+                      <span>Cost: ${item.totalCost?.toFixed(0)}</span>
+                      <span className="mx-2">•</span>
+                      <span>{item.expiries?.length || 1} expir{item.expiries?.length === 1 ? 'y' : 'ies'}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => onLoad(item)}
+                      className="px-2 py-1 text-xs bg-purple-600 hover:bg-purple-700 rounded text-white transition-colors"
+                    >
+                      Load
+                    </button>
+                    <button
+                      onClick={() => onDelete(idx)}
+                      className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded text-white transition-colors"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          // Render single position
+          return (
+            <div key={idx} className={`flex items-center justify-between bg-black/70 rounded-lg p-3 ${isInCompare(idx) ? 'ring-1 ring-purple-500' : ''}`}>
+              <div>
+                <span className={`font-medium ${item.optionType === 'call' ? 'text-green-400' : 'text-red-400'}`}>
+                  {item.optionType?.toUpperCase()}
+                </span>
+                <span className="text-neutral-300 ml-2">
+                  ${item.strikePrice} @ ${item.premium}
+                </span>
+                <span className="text-neutral-500 text-sm ml-2">
+                  {item.expirationDate}
+                </span>
+              </div>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => onCompare(idx)}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    isInCompare(idx)
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
+                  }`}
+                  title={isInCompare(idx) ? 'Remove from compare' : 'Add to compare'}
+                >
+                  {isInCompare(idx) ? '✓' : '+'}
+                </button>
+                <button
+                  onClick={() => onLoad(item)}
+                  className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white transition-colors"
+                >
+                  Load
+                </button>
+                <button
+                  onClick={() => onDelete(idx)}
+                  className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded text-white transition-colors"
+                >
+                  ×
+                </button>
+              </div>
             </div>
-            <div className="flex gap-1">
-              <button
-                onClick={() => onCompare(idx)}
-                className={`px-2 py-1 text-xs rounded transition-colors ${
-                  isInCompare(idx)
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
-                }`}
-                title={isInCompare(idx) ? 'Remove from compare' : 'Add to compare'}
-              >
-                {isInCompare(idx) ? '✓' : '+'}
-              </button>
-              <button
-                onClick={() => onLoad(pos)}
-                className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded text-white transition-colors"
-              >
-                Load
-              </button>
-              <button
-                onClick={() => onDelete(idx)}
-                className="px-2 py-1 text-xs bg-neutral-700 hover:bg-neutral-600 rounded text-white transition-colors"
-              >
-                ×
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       {compareList.length > 0 && (
         <p className="text-xs text-purple-400 mt-2">{compareList.length} position(s) selected for comparison</p>
@@ -1850,17 +1890,9 @@ function App() {
 
   // Portfolio state for multi-position strategies
   const [portfolio, setPortfolio] = useState([]);
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7242/ingest/a466e88a-5535-45a0-9889-d6ce8b1cbbbd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:1774',message:'Portfolio state changed',data:{portfolio,portfolioLength:portfolio?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-  }, [portfolio]);
-  // #endregion
 
   // Calculate derived values
   const daysToExpiry = Math.max(0, daysBetween(new Date(), new Date(values.expirationDate)));
-  // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/a466e88a-5535-45a0-9889-d6ce8b1cbbbd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:1771',message:'daysToExpiry calculation',data:{daysToExpiry,expirationDate:values.expirationDate,now:new Date().toISOString(),portfolioLength:portfolio?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-  // #endregion
   const T = daysToExpiry / 365;
   const sigma = values.iv / 100;
   const r = values.riskFreeRate / 100;
@@ -1892,13 +1924,50 @@ function App() {
   }, [savedPositions]);
 
   const handleSavePosition = useCallback(() => {
-    setSavedPositions((prev) => [...prev, { ...values, savedAt: new Date().toISOString() }]);
+    setSavedPositions((prev) => [...prev, { ...values, type: 'position', savedAt: new Date().toISOString() }]);
   }, [values]);
 
-  const handleLoadPosition = useCallback((position) => {
-    const { savedAt, ...positionValues } = position;
-    setValues(positionValues);
-  }, []);
+  const handleSavePortfolio = useCallback(() => {
+    if (portfolio.length === 0) return;
+
+    const totalCost = portfolio.reduce((sum, p) => sum + (p.costPer100 || p.premium * 100) * (p.qty || 1), 0);
+    const expiries = [...new Set(portfolio.map(p => p.expirationDate))];
+
+    setSavedPositions((prev) => [...prev, {
+      type: 'portfolio',
+      name: `Portfolio (${portfolio.length} positions)`,
+      positions: portfolio,
+      totalCost,
+      expiries,
+      positionCount: portfolio.length,
+      savedAt: new Date().toISOString(),
+    }]);
+  }, [portfolio]);
+
+  const handleLoadPosition = useCallback((item) => {
+    if (item.type === 'portfolio') {
+      // Load portfolio
+      setPortfolio(item.positions);
+      // Load first position into values for display
+      if (item.positions.length > 0) {
+        const firstPos = item.positions[0];
+        setValues({
+          stockPrice: firstPos.stockPrice || values.stockPrice,
+          strikePrice: firstPos.strikePrice,
+          premium: firstPos.premium,
+          optionType: firstPos.optionType,
+          expirationDate: firstPos.expirationDate,
+          iv: firstPos.iv || 30,
+          riskFreeRate: firstPos.riskFreeRate || 5,
+        });
+      }
+    } else {
+      // Load single position
+      const { savedAt, type, ...positionValues } = item;
+      setValues(positionValues);
+      setPortfolio([]);
+    }
+  }, [values.stockPrice]);
 
   const handleDeletePosition = useCallback((index) => {
     setSavedPositions((prev) => prev.filter((_, i) => i !== index));
@@ -1925,9 +1994,6 @@ function App() {
   }, []);
 
   const handleSelectPortfolio = useCallback((positions) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a466e88a-5535-45a0-9889-d6ce8b1cbbbd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:1844',message:'handleSelectPortfolio called',data:{positions,positionsLength:positions?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
     setPortfolio(positions);
   }, []);
 
@@ -1947,12 +2013,22 @@ function App() {
             <h1 className="text-2xl font-bold text-white">
               Options Profit Projection
             </h1>
-            <button
-              onClick={handleSavePosition}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors"
-            >
-              Save Position
-            </button>
+            <div className="flex gap-2">
+              {portfolio.length > 1 && (
+                <button
+                  onClick={handleSavePortfolio}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg font-medium transition-colors"
+                >
+                  Save Portfolio ({portfolio.length})
+                </button>
+              )}
+              <button
+                onClick={handleSavePosition}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors"
+              >
+                Save Position
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -1991,12 +2067,6 @@ function App() {
               daysToExpiry={daysToExpiry}
               portfolio={portfolio}
             />
-            {/* #region agent log */}
-            {(() => {
-              fetch('http://127.0.0.1:7242/ingest/a466e88a-5535-45a0-9889-d6ce8b1cbbbd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:1901',message:'SummaryPanel portfolio prop',data:{portfolio,portfolioLength:portfolio?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-              return null;
-            })()}
-            {/* #endregion */}
             <PayoffChart
               data={payoffData}
               breakEven={breakEven}
